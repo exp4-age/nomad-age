@@ -119,3 +119,15 @@ example_upload_entry_point = "nomad_age.example_uploads:example_upload_entry_poi
 [tool.cruft]
 # Avoid updating workflow files, this leads to permissions issues
 skip = [".github/*"]
+
+[tool.uv.sources]
+nomad-lab = { index = "nomad-lab" }
+
+[[tool.uv.index]]
+name = "nomad-lab"
+url = "https://gitlab.mpcdf.mpg.de/api/v4/projects/2187/packages/pypi/simple"
+
+[dependency-groups]
+dev = [
+    "nomad-lab>=1.3.13",
+]
