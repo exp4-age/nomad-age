@@ -28,6 +28,7 @@ license = { file = "LICENSE" }
 dependencies = [
     "nomad-lab>=1.3.0",
     "python-magic-bin; sys_platform == 'win32'",
+    "evaluix"
 ]
 
 [project.urls]
@@ -129,8 +130,6 @@ name = "nomad-lab"
 url = "https://gitlab.mpcdf.mpg.de/api/v4/projects/2187/packages/pypi/simple"
 
 [dependency-groups]
-dependencies = [
-    "nomad-lab>=1.3.0",
-    "python-magic-bin; sys_platform == 'win32'",
-    "evaluix"
+dev = [
+    "nomad-lab>=1.3.13",
 ]
