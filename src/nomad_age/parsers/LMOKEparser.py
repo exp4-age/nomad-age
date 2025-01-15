@@ -11,15 +11,15 @@ from nomad_age.schema_packages.LMOKEandVMOKESchema import LMOKEandVMOKESchema
 
 def assign_as_single_string(value):
     """
-    Converts a list, tuple, or numpy array to a single string with elements joined by spaces.
+    Converts a list, tuple, or numpy array to a single string joined by spaces.
     If the input is not a list, tuple, or numpy array, it returns the input value as is.
 
     Parameters:
     value (Union[list, tuple, numpy.ndarray, any]): The input value to be converted.
 
     Returns:
-    str: A single string with elements joined by spaces if the input is a list, tuple, or numpy array.
-         Otherwise, returns the input value as is.
+    str: A single string with elements joined by spaces if the input is a list,
+         tuple, or numpy array. Otherwise, returns the input value as is.
     """
     if isinstance(value, Union[list, tuple, numpy.ndarray]):
         return ' '.join(map(str, value))
