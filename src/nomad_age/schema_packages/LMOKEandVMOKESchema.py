@@ -1,5 +1,5 @@
 from nomad.datamodel import ArchiveSection
-from nomad.metainfo import Quantity, Datetime, SubSection, Section, Package
+from nomad.metainfo import Package, Quantity, Section
 
 lmoke_vmoke_package = Package(name='lmoke_vmoke_nomadmetainfo_json', description='None')
 
@@ -51,12 +51,14 @@ Quantities to be defined:
 - **Transversal Magnetic Field**: The transversal magnetic field (only for VMOKE).
 - **Total Field**: The total magnetic field (for LMOKE, equal to longitudinal).
 - **Field Angle**: The angle of the magnetic field.
-- **Longitudinal Intensity**: The intensity of the longitudinal detector signal.
-- **Transversal Intensity**: The intensity of the transversal detector signal (only for VMOKE).
-- **Diff. Intensity Longitudinal**: The differential intensity of the longitudinal detector signal (only for VMOKE).
+- **Longitudinal Intensity**: The intensity of longitudinal detector.
+- **Transversal Intensity**: The intensity of transversal detector (only for VMOKE).
+- **Diff. Intensity Longitudinal**: The differential intensity of the longitudinal
+detector signal (only for VMOKE).
 - **Longitudinal Magnetization**: The longitudinal magnetization.
 - **Transversal Magnetization**: The transversal magnetization (only for VMOKE).
 """
+
 
 class LMOKEandVMOKESchema(ArchiveSection):
     m_def = Section()
@@ -64,22 +66,27 @@ class LMOKEandVMOKESchema(ArchiveSection):
     ###### Device / Sample specfic + uuid
     user = Quantity(
         type=str,
-        description='User name. Name and surname of the person who performed the measurement.',
+        description=(
+            'User name. Name and surname of the person who performed the measurement.'
+        ),
     )
 
     sample = Quantity(
         type=str,
-        description='Sample name. The letter describes its origin.', # e.g. P2024_0123
+        description='Sample name. The letter describes its origin.',
+        # e.g. P2024_0123
     )
 
     sample_state = Quantity(
         type=str,
-        description='The state of the sample during the measurement.', # as made, after FC, after IB, etc.
+        description='The state of the sample during the measurement.',
+        # as made, after FC, after IB, etc.
     )
 
     device = Quantity(
         type=str,
-        description='Measurement device.', #LMOKE or VMOKE
+        description='Measurement device.',
+        # LMOKE or VMOKE
     )
 
     datetime = Quantity(
@@ -105,20 +112,26 @@ class LMOKEandVMOKESchema(ArchiveSection):
 
     sample_angle = Quantity(
         type=float,
-        description='Sample angle in degrees (clockwise, realtive to beam path direction)',
+        description=(
+            'Sample angle in degrees (clockwise, realtive to beam path direction)'
+        ),
         unit='degree',
     )
 
     field_angle = Quantity(
         type=float,
-        description='Field angle in degrees (clockwise, realtive to beam path direction)',
+        description=(
+            'Field angle in degrees (clockwise, realtive to beam path direction)'
+        ),
         unit='degree',
     )
 
     temperature = Quantity(
         type=float,
-        description='Temperature in K. Typically 300K as not always tracked/controlled.',
-        unit = 'K',
+        description=(
+            'Temperature in K. Typically 300K as not always tracked/controlled.'
+        ),
+        unit='K',
     )
 
     calibration = Quantity(
@@ -128,41 +141,57 @@ class LMOKEandVMOKESchema(ArchiveSection):
 
     polarization = Quantity(
         type=str,
-        description='Polarization of the measurement. Typically s or p. Maybe more complex in the future.', #s for s-polarized (LMOKE), p for p-polarized (VMOKE)
+        description=(
+            'Polarization of the measurement. '
+            'Typically s or p. Maybe more complex in the future.'
+        ),  # s for s-polarized (LMOKE), p for p-polarized (VMOKE)
     )
 
     H_start = Quantity(
         type=float,
-        description='Starting field of the measurement in **mT**, kA/m or Oe. Typically larger than Hend', #old files may use kA/m
-        unit = 'mT',
+        description=(
+            'Starting field of the measurement in **mT**, kA/m or Oe. '
+            'Typically larger than Hend'
+        ),  # old files may use kA/m
+        unit='mT',
     )
 
     H_end = Quantity(
         type=float,
-        description='Final field of the first branch in **mT**, kA/m or Oe', #old files may use kA/m
-        unit = 'mT',
+        description='Final field of the first branch in **mT**, kA/m or Oe',
+        # old files may use kA/m
+        unit='mT',
     )
 
     pts_per_branch = Quantity(
         type=int,
-        description='Number of points per branch. I.e. resolution of the measurement with respect to the field.',
+        description=(
+            'Number of points per branch. '
+            'I.e. resolution of the measurement with respect to the field.'
+        ),
     )
 
     time_per_point = Quantity(
         type=float,
         description='Detector integration time per point in s.',
-        unit = 's',
+        unit='s',
     )
 
     delay_time = Quantity(
         type=float,
-        description='Delay time between points in s. I.e. equilibration time after a new field is applied.',
-        unit = 's',
+        description=(
+            'Delay time between points in s. '
+            'I.e. equilibration time after a new field is applied.'
+        ),
+        unit='s',
     )
 
     nCycles = Quantity(
         type=int,
-        description='Number of loop measurements (cycles) to be averaged per hysteresis (e.g. see Scheduled or Raster mode).',
+        description=(
+            'Number of loop measurements (cycles) to be averaged per hysteresis '
+            '(e.g. see Scheduled or Raster mode).'
+        ),
     )
 
     cycle = Quantity(
@@ -175,18 +204,19 @@ class LMOKEandVMOKESchema(ArchiveSection):
         description='Comment on the measurement.',
     )
 
-
     ###### Optional metadata
     H_stop = Quantity(
         type=float,
-        description='Stopping field of MinorLoops/FORC measurements in **mT**, kA/m or Oe.',
-        unit = 'mT',
+        description=(
+            'Stopping field of MinorLoops/FORC measurements in **mT**, kA/m or Oe.'
+        ),
+        unit='mT',
     )
 
     wait_time = Quantity(
         type=float,
         description='Wait time of scheduled mode (LMOKE) between measurements in s.',
-        unit = 's',
+        unit='s',
     )
 
     nSched = Quantity(
@@ -201,54 +231,57 @@ class LMOKEandVMOKESchema(ArchiveSection):
 
     nX = Quantity(
         type=int,
-        description='Total number of points in X', #Only LMOKE
+        description='Total number of points in X',  # Only LMOKE
     )
 
     nY = Quantity(
         type=int,
-        description='Total number of points in Y', #Only LMOKE
+        description='Total number of points in Y',  # Only LMOKE
     )
 
     DeltaX = Quantity(
         type=float,
-        description='Total size in X in mm', #Only LMOKE
-        unit = 'mm',
+        description='Total size in X in mm',  # Only LMOKE
+        unit='mm',
     )
 
     DeltaY = Quantity(
         type=float,
-        description='Total size in Y in mm', #Only LMOKE
-        unit = 'mm',
+        description='Total size in Y in mm',  # Only LMOKE
+        unit='mm',
     )
 
     X = Quantity(
         type=int,
-        description='Current position in X as point number (1-based index)', #Only LMOKE
+        description='Current position in X as point number (1-based index)',
+        # Only LMOKE
     )
 
     Y = Quantity(
         type=int,
-        description='Current position in Y as point number (1-based index)', #Only LMOKE
+        description='Current position in Y as point number (1-based index)',
+        # Only LMOKE
     )
 
     avg_raster = Quantity(
-        type = bool,
-        description='True if the measurement is averaged over a raster', #old mode, still usable but not recommended
+        type=bool,
+        description='True if the measurement is averaged over a raster',
+        # old mode, still usable but not recommended
     )
 
     max_voltage_correction = Quantity(
-        type=bool, # TODO: Check if this is correct
-        description='Maximum voltage correction for the measurement', #Only VMOKE
+        type=bool,  # TODO: Check if this is correct
+        description='Maximum voltage correction for the measurement',  # Only VMOKE
     )
 
     training_effect_elimination = Quantity(
         type=bool,
-        description='True if training effect elimination is applied', #Only VMOKE
+        description='True if training effect elimination is applied',  # Only VMOKE
     )
 
     ###### Measurement Data
-    # Maybe instead of defining all these quantities together, a single quantity for each
-    # of the following is defined:
+    # Maybe instead of defining all these quantities together, a single quantity for
+    # each of the following is defined:
     # magnetic field with shape [longitudinal, transversal, total]
     # intensity with shape [longitudinal, transversal, diff_longitudinal]
     # magnetization with shape [longitudinal, transversal, total]
@@ -256,24 +289,29 @@ class LMOKEandVMOKESchema(ArchiveSection):
     # Magnetic field
     magnetic_field = Quantity(
         type=float,
-        shape = [None], # either [longitudinal, transversal, total] or [longitudinal]
+        shape=[None],  # either [longitudinal, transversal, total] or [longitudinal]
         description='Magnetic fields / field components in **mT**, kA/m or Oe.',
-        unit = 'mT',
+        unit='mT',
     )
 
     # Intensity
     intensity = Quantity(
         type=float,
-        shape = [None], # either [longitudinal, transversal, diff_longitudinal] or [longitudinal]
-        description='Intensity measured at the detectors in detector voltage representing light intensity.',
-        unit = 'V',
+        shape=[
+            None
+        ],  # either [longitudinal, transversal, diff_longitudinal] or [longitudinal]
+        description=(
+            'Intensity measured at the detectors in detector voltage '
+            'representing light intensity.'
+        ),
+        unit='V',
         a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
 
     # Magnetization
     magnetization = Quantity(
         type=float,
-        shape = [None], # either [longitudinal, transversal, total] or [longitudinal]
+        shape=[None],  # either [longitudinal, transversal, total] or [longitudinal]
         description='Magnetization in arbitrary units (typically normalized).',
         a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
@@ -283,26 +321,26 @@ class LMOKEandVMOKESchema(ArchiveSection):
     HC = Quantity(
         type=float,
         description='Coercivity in **mT**, kA/m or Oe.',
-        unit = 'mT',
+        unit='mT',
     )
 
     dHC = Quantity(
         type=float,
         description='Uncertainty of the coercivity in **mT**, kA/m or Oe.',
-        unit = 'mT',
+        unit='mT',
     )
 
     # Exchange bias
     HEB = Quantity(
         type=float,
         description='Exchange bias in **mT**, kA/m or Oe.',
-        unit = 'mT',
+        unit='mT',
     )
 
     dHEB = Quantity(
         type=float,
         description='Uncertainty of the exchange bias in **mT**, kA/m or Oe.',
-        unit = 'mT',
+        unit='mT',
     )
 
     # Magnetization saturation
@@ -321,7 +359,7 @@ class LMOKEandVMOKESchema(ArchiveSection):
     # Remanent magnetization
     MR = Quantity(
         type=float,
-        shape = [3],
+        shape=[3],
         description='Remanent magnetization in arb. u.',
         a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
@@ -335,7 +373,7 @@ class LMOKEandVMOKESchema(ArchiveSection):
     # Magnetization at exchange bias
     MHEB = Quantity(
         type=float,
-        shape = [3],
+        shape=[3],
         description='Magnetization at exchange bias in arb. u.',
         a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
@@ -362,16 +400,16 @@ class LMOKEandVMOKESchema(ArchiveSection):
     # Saturation fields
     saturation_fields = Quantity(
         type=float,
-        shape = [2],
+        shape=[2],
         description='Saturation fields in **mT**, kA/m or Oe.',
-        unit = 'mT',
+        unit='mT',
     )
 
     dsaturation_fields = Quantity(
         type=float,
-        shape = [2],
+        shape=[2],
         description='Uncertainty of the saturation fields in **mT**, kA/m or Oe.',
-        unit = 'mT',
+        unit='mT',
     )
 
     # Slope at HC
@@ -403,12 +441,17 @@ class LMOKEandVMOKESchema(ArchiveSection):
     # Angle enclosed by the hysteresis loop slopes
     alpha = Quantity(
         type=float,
-        description='Angle enclosed by the hysteresis loop slopes (at HC and HEB) in degrees.',
+        description=(
+            'Angle enclosed by the hysteresis loop slopes (at HC and HEB) in degrees.'
+        ),
     )
 
     dalpha = Quantity(
         type=float,
-        description='Uncertainty of the angle enclosed by the hysteresis loop slopes (at HC and HEB) in degrees.',
+        description=(
+            'Uncertainty of the angle enclosed by the hysteresis loop slopes '
+            '(at HC and HEB) in degrees.'
+        ),
     )
 
     # Rectangularity
@@ -421,5 +464,6 @@ class LMOKEandVMOKESchema(ArchiveSection):
         type=float,
         description='Uncertainty of the norm. rectangularity of the hysteresis loop.',
     )
+
 
 lmoke_vmoke_package.__init_metainfo__()
