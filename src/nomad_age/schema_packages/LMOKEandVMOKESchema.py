@@ -305,7 +305,6 @@ class LMOKEandVMOKESchema(ArchiveSection):
             'representing light intensity.'
         ),
         unit='V',
-        a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
 
     # Magnetization
@@ -313,7 +312,6 @@ class LMOKEandVMOKESchema(ArchiveSection):
         type=float,
         shape=[None],  # either [longitudinal, transversal, total] or [longitudinal]
         description='Magnetization in arbitrary units (typically normalized).',
-        a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
 
     ####### Evaluated values
@@ -347,13 +345,11 @@ class LMOKEandVMOKESchema(ArchiveSection):
     MS = Quantity(
         type=float,
         description='Saturation magnetization in arb. u.',
-        a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
 
     dMS = Quantity(
         type=float,
         description='Uncertainty of the saturation magnetization in arb. u.',
-        a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
 
     # Remanent magnetization
@@ -361,13 +357,11 @@ class LMOKEandVMOKESchema(ArchiveSection):
         type=float,
         shape=[3],
         description='Remanent magnetization in arb. u.',
-        a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
 
     dMR = Quantity(
         type=float,
         description='Uncertainty of the remanent magnetization in arb. u.',
-        a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
 
     # Magnetization at exchange bias
@@ -375,26 +369,22 @@ class LMOKEandVMOKESchema(ArchiveSection):
         type=float,
         shape=[3],
         description='Magnetization at exchange bias in arb. u.',
-        a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
 
     dMHEB = Quantity(
         type=float,
         description='Uncertainty of the magnetization at exchange bias in arb. u.',
-        a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
 
     # Integral of the hysteresis loop
     integral = Quantity(
         type=float,
         description='Integral of the hysteresis loop in arb. u.',
-        a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
 
     dintegral = Quantity(
         type=float,
         description='Uncertainty of the integral of the hysteresis loop in arb. u.',
-        a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
 
     # Saturation fields
@@ -416,26 +406,22 @@ class LMOKEandVMOKESchema(ArchiveSection):
     slope_atHC = Quantity(
         type=float,
         description='Slope at the coercivity in arb. u.',
-        a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
 
     dslope_atHC = Quantity(
         type=float,
         description='Uncertainty of the slope at the coercivity in arb. u.',
-        a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
 
     # Slope at HEB
     slope_atHEB = Quantity(
         type=float,
         description='Slope at the exchange bias in arb. u.',
-        a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
 
     dslope_atHEB = Quantity(
         type=float,
         description='Uncertainty of the slope at the exchange bias in arb. u.',
-        a_eln=dict(defaultDisplayUnit='arb. u.'),
     )
 
     # Angle enclosed by the hysteresis loop slopes
