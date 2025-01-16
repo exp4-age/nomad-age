@@ -31,6 +31,6 @@ lmoke_parser_entry_point = LMOKEParserEntryPoint(
     name='LMOKEParser',
     description='LMOKE parser entry point configuration.',
     mainfile_name_re=r'.*LMOKE.*\.txt',
-    mainfile_contents_re=r'^#\s+Meas\.\s+type\s+',
+    mainfile_contents_re=r'#\s+Meas\.\s+type\s+',
     # this is a regular expression that matches the contents of the mainfile
 )
