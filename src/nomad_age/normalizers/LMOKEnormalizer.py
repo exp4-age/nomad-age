@@ -23,9 +23,13 @@ class LMOKENormalizer(Normalizer):
         ):
             logger.info('Normalizing magnetization data')
             # Normalize the magnetization data
-            archive.data.magnetization = self.normalize_magnetization(
+            magnetization = self.normalize_magnetization(
                 archive.data['magnetic_field'], archive.data['intensity']
             )
+
+            print(type(magnetization))
+            setattr(archive.data, 'magnetization', magnetization)
+            print(type(archive.data['magnetization']), type(magnetization))
 
             evaluated_hysteresis = self.hyseval(
                 archive.data['magnetic_field'],
@@ -60,19 +64,21 @@ class LMOKENormalizer(Normalizer):
         intensity: Union[list, np.array],
     ):
         # Normalize the magnetization data
-        magnetic_field = np.array(magnetic_field)
-        intensity = np.array(intensity)
+        # magnetic_field = np.array(magnetic_field)
+        # intensity = np.array(intensity)
 
-        magnetization = ef.del_outliers(intensity, threshold=3, neighbours=5)
+        magnetization = ef.del_outliers(intensity.magnitude, threshold=3, neighbours=5)
         magnetization = ef.rmv_opening(magnetization, sat_region=0.1)
         magnetization = ef.slope_correction(
-            magnetic_field,
+            magnetic_field.magnitude,
             magnetization,
             sat_region=0.1,
             noise_threshold=3,
             branch_difference=0.3,
         )
-        magnetization = ef.hys_norm(magnetic_field, magnetization, sat_region=0.1)
+        magnetization = ef.hys_norm(
+            magnetic_field.magnitude, magnetization, sat_region=0.1
+        )
 
         return magnetization
 
@@ -83,11 +89,11 @@ class LMOKENormalizer(Normalizer):
         model: str,
     ):
         # Evaluate the hysteresis loop
-        magnetic_field = np.array(magnetic_field)
-        magnetization = np.array(magnetization)
+        _magnetic_field = magnetic_field.magnitude
+        _magnetization = np.array(magnetization)  # magnetization.magnitude
 
         # check if model is available in EvaluationFunctions
         if hasattr(ef, model):
-            evaluated_hysteresis = getattr(ef, model)(magnetic_field, magnetization)
+            evaluated_hysteresis = getattr(ef, model)(_magnetic_field, _magnetization)
 
         return evaluated_hysteresis
