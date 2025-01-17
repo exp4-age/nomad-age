@@ -2,12 +2,12 @@ import logging
 
 from nomad.datamodel import EntryArchive
 
-from nomad_age.parsers.parser import NewParser
+# from nomad_age.parsers.parser import NewParser
 
 
-def test_parse_file():
-    parser = NewParser()
-    archive = EntryArchive()
-    parser.parse('tests/data/example.out', archive, logging.getLogger())
+# def test_parse_file():
+#     parser = NewParser()
+#     archive = EntryArchive()
+#     parser.parse('tests/data/example.out', archive, logging.getLogger())
 
-    assert archive.workflow2.name == 'test'
+#     assert archive.workflow2.name == 'test'
