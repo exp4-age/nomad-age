@@ -132,4 +132,5 @@ url = "https://gitlab.mpcdf.mpg.de/api/v4/projects/2187/packages/pypi/simple"
 [dependency-groups]
 dev = [
     "nomad-lab>=1.3.13",
+    "pytest>=8.3.4",
 ]
