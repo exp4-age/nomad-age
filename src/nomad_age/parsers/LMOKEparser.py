@@ -2,7 +2,7 @@ import re
 from typing import Union
 
 import numpy
-from nomad.datamodel import EntryArchive
+from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.parsing import MatchingParser
 from nomad.parsing.file_parser import DataTextParser, Quantity, TextParser
 
@@ -93,6 +93,13 @@ class LMOKEParser(MatchingParser):
                 '%Y-%m-%d_%H-%M-%S', time.localtime(creation_time)
             )
 
+        # TODO: Check if this is correct
+        if archive.metadata is None:
+            archive.metadata = EntryMetadata()
+
+        if archive.metadata.entry_type is None:
+            archive.metadata.entry_type = 'Experiment'
+
         mainfile_parser.mainfile = mainfile
         mainfile_parser.parse()  # extract all metadata from the mainfile
 
@@ -180,6 +187,7 @@ class LMOKEParser(MatchingParser):
         )
 
         archive.data = lmokeandvmokeschema
+
         logger.info(f'Stored metadata in {archive}')
 
 

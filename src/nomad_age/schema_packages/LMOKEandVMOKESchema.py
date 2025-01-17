@@ -1,4 +1,6 @@
-from nomad.datamodel import ArchiveSection
+import plotly.express as px
+from nomad.datamodel.data import Schema
+from nomad.datamodel.metainfo.plot import PlotlyFigure, PlotSection
 from nomad.metainfo import Package, Quantity, Section
 
 lmoke_vmoke_package = Package(name='lmoke_vmoke_nomadmetainfo_json', description='None')
@@ -60,7 +62,7 @@ detector signal (only for VMOKE).
 """
 
 
-class LMOKEandVMOKESchema(ArchiveSection):
+class LMOKEandVMOKESchema(Schema, PlotSection):
     m_def = Section()
 
     ###### Device / Sample specfic + uuid
@@ -217,6 +219,7 @@ class LMOKEandVMOKESchema(ArchiveSection):
         type=float,
         description='Wait time of scheduled mode (LMOKE) between measurements in s.',
         unit='s',
+        a_eln=dict(defaultDisplayUnit='s'),
     )
 
     nSched = Quantity(
@@ -279,6 +282,34 @@ class LMOKEandVMOKESchema(ArchiveSection):
         description='True if training effect elimination is applied',  # Only VMOKE
     )
 
+    def generate_hysteresis_plot(self, x_name='magnetic_field', y_name='intensity'):
+        x = self[x_name]
+        y = self[y_name]
+
+        if y_name == 'intensity':
+            yaxis_title = 'Intensity [arb. u.]'
+        elif y_name == 'magnetization':
+            yaxis_title = 'Magnetization [arb. u.]'
+
+        hys_plot = px.line(x=x, y=y)
+
+        hys_plot.update_layout(
+            xaxis_title='Magnetic Field [mT]',
+            yaxis_title=yaxis_title,
+            xaxis_showgrid=True,
+            xaxis_zeroline=True,
+            xaxis_zerolinecolor='black',
+            xaxis_zerolinewidth=2,
+            yaxis_showgrid=True,
+            yaxis_zeroline=True,
+            yaxis_zerolinecolor='black',
+            yaxis_zerolinewidth=2,
+        )
+
+        hys_plot_json = hys_plot.to_plotly_json()
+
+        self.figures.append(PlotlyFigure(figure=hys_plot_json))
+
     ###### Measurement Data
     # Maybe instead of defining all these quantities together, a single quantity for
     # each of the following is defined:
@@ -289,7 +320,7 @@ class LMOKEandVMOKESchema(ArchiveSection):
     # Magnetic field
     magnetic_field = Quantity(
         type=float,
-        shape=[None],  # either [longitudinal, transversal, total] or [longitudinal]
+        shape=['*'],  # either [longitudinal, transversal, total] or [longitudinal]
         description='Magnetic fields / field components in **mT**, kA/m or Oe.',
         unit='mT',
     )
@@ -298,7 +329,7 @@ class LMOKEandVMOKESchema(ArchiveSection):
     intensity = Quantity(
         type=float,
         shape=[
-            None
+            '*'
         ],  # either [longitudinal, transversal, diff_longitudinal] or [longitudinal]
         description=(
             'Intensity measured at the detectors in detector voltage '
@@ -310,7 +341,7 @@ class LMOKEandVMOKESchema(ArchiveSection):
     # Magnetization
     magnetization = Quantity(
         type=float,
-        shape=[None],  # either [longitudinal, transversal, total] or [longitudinal]
+        shape=['*'],  # either [longitudinal, transversal, total] or [longitudinal]
         description='Magnetization in arbitrary units (typically normalized).',
     )
 

@@ -1,7 +1,9 @@
+import traceback
 from typing import Union
 
 import evaluix.utils.EvaluationFunctions as ef
 import numpy as np
+import pint
 from nomad.datamodel import EntryArchive
 from nomad.normalizing import Normalizer
 
@@ -27,15 +29,27 @@ class LMOKENormalizer(Normalizer):
                 archive.data['magnetic_field'], archive.data['intensity']
             )
 
-            print(type(magnetization))
-            setattr(archive.data, 'magnetization', magnetization)
-            print(type(archive.data['magnetization']), type(magnetization))
+            archive.data.magnetization = magnetization
 
             evaluated_hysteresis = self.hyseval(
                 archive.data['magnetic_field'],
                 archive.data['magnetization'],
                 'tan_hyseval',
             )
+
+            try:
+                if archive.data.magnetization is not None:
+                    archive.data.generate_hysteresis_plot(
+                        x_name='magnetic_field', y_name='magnetization'
+                    )
+                else:
+                    archive.data.generate_hysteresis_plot(
+                        x_name='magnetic_field', y_name='intensity'
+                    )
+            except Exception as e:
+                logger.error(f'Error generating hysteresis plot: {e}')
+                logger.error(traceback.format_exc())
+
             # depending if fitted (analytical) or calculated, the output is different
             NUMERICAL_LENGTH = 1
             ANALYTICAL_LENGTH = 3
@@ -47,15 +61,18 @@ class LMOKENormalizer(Normalizer):
                 params = {}
 
             # Add the evaluated hysteresis parameters to the archive
+
             for key in params.keys():
-                if 'd' + key in params:  # quantities with uncertainties
+                if (
+                    'd' + key in params.keys()
+                ):  # if the uncertainty is present (+ 'd'), the value should be
+                    # present as well
                     dkey = 'd' + key
 
                     setattr(archive.data, key, params[key])
                     setattr(archive.data, dkey, params[dkey])
 
-                elif key in ['r_squared']:  # quantities without uncertainties
-                    # so far just r_squared
+                else:
                     setattr(archive.data, key, params[key])
 
     def normalize_magnetization(
@@ -80,17 +97,29 @@ class LMOKENormalizer(Normalizer):
             magnetic_field.magnitude, magnetization, sat_region=0.1
         )
 
-        return magnetization
+        # Convert the magnetization back to a pint.Quantity object
+        magnetization_quantity = pint.Quantity(magnetization, intensity.units)
+
+        return magnetization_quantity
+
+        # return magnetization
 
     def hyseval(
         self,
-        magnetic_field: Union[list, np.array],
-        magnetization: Union[list, np.array],
+        magnetic_field: Union[list, np.array, pint.Quantity],
+        magnetization: Union[list, np.array, pint.Quantity],
         model: str,
     ):
         # Evaluate the hysteresis loop
-        _magnetic_field = magnetic_field.magnitude
-        _magnetization = np.array(magnetization)  # magnetization.magnitude
+        if isinstance(magnetic_field, pint.Quantity):
+            _magnetic_field = magnetic_field.magnitude
+        else:
+            _magnetic_field = magnetic_field
+
+        if isinstance(magnetization, pint.Quantity):
+            _magnetization = magnetization.magnitude
+        else:
+            _magnetization = magnetization
 
         # check if model is available in EvaluationFunctions
         if hasattr(ef, model):

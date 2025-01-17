@@ -23,9 +23,10 @@ class LMOKEandVMOKESchemaEntryPoint(SchemaPackageEntryPoint):
     def load(self):
         from nomad_age.schema_packages.LMOKEandVMOKESchema import lmoke_vmoke_package
 
-        return lmoke_vmoke_package # Package with LMOKE and VMOKE schemas
+        return lmoke_vmoke_package  # Package with LMOKE and VMOKE schemas
+
 
 lmokeandvmoke_schema_entry_point = LMOKEandVMOKESchemaEntryPoint(
-    name = 'LMOKEandVMOKESchema',
-    description = 'Entry Point for custom LMOKE and VMOKE schema.',
+    name='LMOKEandVMOKESchema',
+    description='Entry Point for custom LMOKE and VMOKE schema.',
 )
