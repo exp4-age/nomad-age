@@ -129,3 +129,5 @@ dmypy.json
 # Pyre type checker
 .pyre/
 Testing.ipynb
+uv.lock
+2023_0325_1_LMOKE_2023-11-07_14-09-15.txt
