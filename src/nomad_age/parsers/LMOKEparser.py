@@ -1,5 +1,4 @@
 import re
-from typing import Union
 
 import numpy
 from nomad.datamodel import EntryArchive, EntryMetadata
@@ -21,7 +20,9 @@ def assign_as_single_string(value):
     str: A single string with elements joined by spaces if the input is a list,
          tuple, or numpy array. Otherwise, returns the input value as is.
     """
-    if isinstance(value, Union[list, tuple, numpy.ndarray]):
+    if isinstance(value, (list, tuple)) or (
+        numpy is not None and isinstance(value, numpy.ndarray)
+    ):
         return ' '.join(map(str, value))
     return value
 
