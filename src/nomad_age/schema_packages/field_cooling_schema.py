@@ -8,7 +8,8 @@ from nomad.datamodel.metainfo.annotations import (
     Filter,
 )
 from nomad.datamodel.metainfo.plot import PlotSection
-from nomad_age.schema_packages.age_schema import Sample
+from nomad.datamodel.metainfo.basesections.v2 import Process
+
 
 
 configuration = config.get_plugin_entry_point(
@@ -18,26 +19,13 @@ configuration = config.get_plugin_entry_point(
 m_package = SchemaPackage(name="field_cooling_schema")
 
 
-class FieldCoolingEntry(PlotSection, EntryData):
+class FieldCoolingEntry(PlotSection, Process):
     m_def = Section(
         label="Field Cooling",
         description="A Field Cooling process.",
         a_eln=ELNAnnotation(
-            properties=SectionProperties(editable=Filter(exclude=["experiment_date", "blocking_temperature", "plateau_duration", "cooling_rate"]))
+            properties=SectionProperties(visible=Filter(exclude=["lab_id"]))
         ),
-    )
-
-    samples = SubSection(
-        sub_section=Sample,
-        description="All the samples field cooled in this process.",
-        repeats=True,
-        a_eln=ELNAnnotation(label='Samples', overview=True),
-    )
-
-    experiment_date = Quantity(
-        type=Datetime,
-        description="Experiment timestamp",
-        a_eln=ELNAnnotation(component=ELNComponentEnum.DateTimeEditQuantity),
     )
 
     blocking_temperature = Quantity(

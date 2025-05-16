@@ -1,6 +1,6 @@
 import numpy as np
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from nomad.config import config
 from nomad.parsing import MatchingParser
 from nomad.datamodel import EntryArchive
@@ -8,7 +8,7 @@ from ..schema_packages.field_cooling_schema import FieldCoolingEntry
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from nomad.datamodel.metainfo.plot import PlotlyFigure
-from nomad_age.schema_packages.age_schema import Sample
+from nomad.datamodel.metainfo.basesections.v2 import System
 
 configuration = config.get_plugin_entry_point(
     'nomad_age.parsers:field_cooling_parser_entry_point'
@@ -92,7 +92,10 @@ class FieldCoolingParser(MatchingParser):
         )
         entry = FieldCoolingEntry()
         archive.data = entry
-        entry.name = f'FC_{mainfile.split("/")[-1].split(".")[0]}'
+        entry.name = f'FC_{mainfile.split("/")[-1].split(".DAT")[0]}'
+        entry.method = "Fieldcooling"
+        entry.instrument = "Fieldcooling"
+        entry.location = "BAHAMAS"
 
         with open(mainfile, encoding='latin1') as f:
             content = f.read()
@@ -102,10 +105,12 @@ class FieldCoolingParser(MatchingParser):
             if 'Probenname:' in line:
                 # match on 4 numbers underscore 4 numbers and then optional underscore one number.
                 # Can repeat for multiple samples
-                sample_names = re.findall(r'\d{4}_\d{4}_?\d?', line.split(':')[1])
-                entry.samples = [Sample(name=name, state="after FC", comment="") for name in sample_names]
+                # sample_names = re.findall(r'\d{4}_\d{4}_?\d?', line.split(':')[1])
+                # entry.samples = [System(name=name, description="after FC") for name in sample_names]
+                pass
             elif 'Datum:' in line:
-                entry.experiment_date = parse_date(line.split(':', 1)[1].strip())
+                start_time = parse_date(line.split(':', 1)[1].strip())
+                entry.datetime = start_time
             elif 'T(Blocking)' in line:
                 entry.blocking_temperature = float(line.split(':')[1])
             elif 'Plateuzeit' in line:
@@ -130,6 +135,8 @@ class FieldCoolingParser(MatchingParser):
         if data_table:
             data = np.array(data_table)
             entry.time = data[:, 0].tolist()
+            if start_time:
+                entry.end_time = start_time + timedelta(seconds=data[:,0].tolist()[-1])
             entry.measured_temperature = data[:, 1].tolist()
             entry.target_temperature = data[:, 2].tolist()
             entry.pirani_pressure = data[:, 3].tolist()

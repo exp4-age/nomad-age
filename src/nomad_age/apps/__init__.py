@@ -41,19 +41,18 @@ age_samples = AppEntryPoint(
         category="Experiment",
         description="AGE samples database, used to find all our samples",
         search_quantities=SearchQuantities(
-            include=["*nomad_age.schema_packages.age_schema.Sample"]
+            include=["*nomad_age.schema_packages.age_schema.AGE_Sample"]
         ),
         filters_locked={
             "section_defs.definition_qualified_name": [
-                "nomad_age.schema_packages.age_schema.Sample"
+                "nomad_age.schema_packages.age_schema.AGE_Sample"
             ]
         },
         columns=Columns(
-            selected=["name", "comment", "state", "entry_type"],
+            selected=["lab_id", "state", "entry_type"],
             options={
                 "entry_type": Column(quantity="entry_type", label="Type"),
-                "name": Column(quantity="data.name", label="Sample name"),
-                "comment": Column(quantity="data.comment", label="Sample comment"),
+                "lab_id": Column(quantity="data.lab_id", label="Sample ID"),
                 "state": Column(quantity="data.state", label="Sample state"),
             },
         ),
@@ -61,10 +60,10 @@ age_samples = AppEntryPoint(
             title="Sample",
             items=[
                 MenuItemTerms(
-                    quantity="data.name#nomad_age.schema_packages.age_schema.Sample",
+                    quantity="data.lab_id#nomad_age.schema_packages.age_schema.AGE_Sample",
                 ),
                 MenuItemTerms(
-                    quantity="data.state#nomad_age.schema_packages.age_schema.Sample",
+                    quantity="data.state#nomad_age.schema_packages.age_schema.AGE_Sample",
                 ),
             ],
         ),
@@ -72,8 +71,8 @@ age_samples = AppEntryPoint(
             "widgets": [
                 {
                     "type": "terms",
-                    "search_quantity": "data.name#nomad_age.schema_packages.age_schema.Sample",
-                    "title": "Sample name",
+                    "search_quantity": "data.lab_id#nomad_age.schema_packages.age_schema.AGE_Sample",
+                    "title": "Sample ID",
                     "show_input": True,
                     "layout": {
                         "lg": {"minH": 3, "minW": 3, "h": 3, "w": 6, "x": 6, "y": 0},
@@ -82,7 +81,7 @@ age_samples = AppEntryPoint(
                 },
                 {
                     "type": "terms",
-                    "search_quantity": "data.state#nomad_age.schema_packages.age_schema.Sample",
+                    "search_quantity": "data.state#nomad_age.schema_packages.age_schema.AGE_Sample",
                     "title": "Sample state",
                     "show_input": True,
                     "layout": {
