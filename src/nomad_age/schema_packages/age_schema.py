@@ -18,7 +18,6 @@ class AGE_Sample(System, EntryData):
         type=MEnum(["as made", "after FC", "after IB"]),
         description="Sample state",
         a_eln=ELNAnnotation(component=ELNComponentEnum.EnumEditQuantity),
-        default="as made",
     )
 
 m_package.__init_metainfo__()
