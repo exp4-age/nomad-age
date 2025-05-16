@@ -109,21 +109,20 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [project.entry-points.'nomad.plugin']
-# parser_entry_point = "nomad_age.parsers:parser_entry_point"
-# schema_package_entry_point = "nomad_age.schema_packages:schema_package_entry_point"
-# normalizer_entry_point = "nomad_age.normalizers:normalizer_entry_point"
-# app_entry_point = "nomad_age.apps:app_entry_point"
-# example_upload_entry_point = "nomad_age.example_uploads:example_upload_entry_point"
+age_samples = "nomad_age.apps:age_samples"
+age_schema_entry_point = "nomad_age.schema_packages:age_schema_entry_point"
 lmoke_parser_entry_point = "nomad_age.parsers:lmoke_parser_entry_point"
 lmokeandvmoke_schema_entry_point = "nomad_age.schema_packages:lmokeandvmoke_schema_entry_point"
 lmokenormalizer_entry_point = "nomad_age.normalizers:lmokenormalizer_entry_point"
+field_cooling_schema = "nomad_age.schema_packages:field_cooling_schema_entry_point"
+field_cooling_parser_entry_point = "nomad_age.parsers:field_cooling_parser_entry_point"
 
 [tool.cruft]
 # Avoid updating workflow files, this leads to permissions issues
 skip = [".github/*"]
 
 [tool.uv.sources]
-nomad-lab = { index = "nomad-lab" }
+nomad-lab = { workspace = true}
 
 [[tool.uv.index]]
 name = "nomad-lab"
@@ -131,6 +130,5 @@ url = "https://gitlab.mpcdf.mpg.de/api/v4/projects/2187/packages/pypi/simple"
 
 [dependency-groups]
 dev = [
-    "nomad-lab>=1.3.13",
     "pytest>=8.3.4",
 ]
