@@ -1,14 +1,15 @@
-import numpy as np
 import re
 from datetime import datetime, timedelta
-from nomad.config import config
-from nomad.parsing import MatchingParser
-from nomad.datamodel import EntryArchive
-from ..schema_packages.field_cooling_schema import FieldCoolingEntry
+
+import numpy as np
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+from nomad.config import config
+from nomad.datamodel import EntryArchive
 from nomad.datamodel.metainfo.plot import PlotlyFigure
-from nomad.datamodel.metainfo.basesections.v2 import System
+from nomad.parsing import MatchingParser
+from plotly.subplots import make_subplots
+
+from ..schema_packages.field_cooling_schema import FieldCoolingEntry
 
 configuration = config.get_plugin_entry_point(
     'nomad_age.parsers:field_cooling_parser_entry_point'
@@ -103,10 +104,12 @@ class FieldCoolingParser(MatchingParser):
         # Parse metadata
         for line in content.split('\n'):
             if 'Probenname:' in line:
-                # match on 4 numbers underscore 4 numbers and then optional underscore one number.
+                # match on 4 numbers underscore 4 numbers,
+                # then optional underscore one number.
                 # Can repeat for multiple samples
                 # sample_names = re.findall(r'\d{4}_\d{4}_?\d?', line.split(':')[1])
-                # entry.samples = [System(name=name, description="after FC") for name in sample_names]
+                # entry.samples = [System(name=name,
+                # description="after FC") for name in sample_names]
                 pass
             elif 'Datum:' in line:
                 start_time = parse_date(line.split(':', 1)[1].strip())

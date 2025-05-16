@@ -1,8 +1,8 @@
-from nomad.metainfo import Section, Quantity, SubSection, SchemaPackage, MSection, MEnum
-from nomad.datamodel import EntryData
 from nomad.config import config
-from nomad.datamodel.metainfo.annotations import ELNAnnotation, ELNComponentEnum, SectionProperties, Filter
+from nomad.datamodel import EntryData
+from nomad.datamodel.metainfo.annotations import ELNAnnotation, ELNComponentEnum
 from nomad.datamodel.metainfo.basesections.v2 import System
+from nomad.metainfo import MEnum, Quantity, SchemaPackage, Section
 
 configuration = config.get_plugin_entry_point(
     "nomad_age.schema_packages:age_schema_entry_point"

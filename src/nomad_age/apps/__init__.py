@@ -5,9 +5,9 @@ from nomad.config.models.ui import (
     Columns,
     FilterMenu,
     FilterMenus,
-    SearchQuantities,
     Menu,
     MenuItemTerms,
+    SearchQuantities,
 )
 
 app_entry_point = AppEntryPoint(
@@ -32,6 +32,7 @@ app_entry_point = AppEntryPoint(
 )
 
 
+sample_schema = "nomad_age.schema_packages.age_schema.AGE_Sample"
 age_samples = AppEntryPoint(
     name="age_samples",
     description="AGE sample database.",
@@ -41,11 +42,11 @@ age_samples = AppEntryPoint(
         category="Experiment",
         description="AGE samples database, used to find all our samples",
         search_quantities=SearchQuantities(
-            include=["*nomad_age.schema_packages.age_schema.AGE_Sample"]
+            include=[sample_schema]
         ),
         filters_locked={
             "section_defs.definition_qualified_name": [
-                "nomad_age.schema_packages.age_schema.AGE_Sample"
+                sample_schema
             ]
         },
         columns=Columns(
@@ -60,10 +61,10 @@ age_samples = AppEntryPoint(
             title="Sample",
             items=[
                 MenuItemTerms(
-                    quantity="data.lab_id#nomad_age.schema_packages.age_schema.AGE_Sample",
+                    quantity=f"data.lab_id#{sample_schema}",
                 ),
                 MenuItemTerms(
-                    quantity="data.state#nomad_age.schema_packages.age_schema.AGE_Sample",
+                    quantity=f"data.state#{sample_schema}",
                 ),
             ],
         ),
@@ -71,7 +72,8 @@ age_samples = AppEntryPoint(
             "widgets": [
                 {
                     "type": "terms",
-                    "search_quantity": "data.lab_id#nomad_age.schema_packages.age_schema.AGE_Sample",
+                    "search_quantity":
+                    f"data.lab_id#{sample_schema}",
                     "title": "Sample ID",
                     "show_input": True,
                     "layout": {
@@ -81,7 +83,8 @@ age_samples = AppEntryPoint(
                 },
                 {
                     "type": "terms",
-                    "search_quantity": "data.state#nomad_age.schema_packages.age_schema.AGE_Sample",
+                    "search_quantity":
+                    f"data.state#{sample_schema}",
                     "title": "Sample state",
                     "show_input": True,
                     "layout": {

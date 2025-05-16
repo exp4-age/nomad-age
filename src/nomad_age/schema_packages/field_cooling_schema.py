@@ -1,16 +1,13 @@
-from nomad.datamodel.data import EntryData
-from nomad.metainfo import Quantity, Section, SubSection, Datetime, SchemaPackage
 from nomad.config import config
 from nomad.datamodel.metainfo.annotations import (
     ELNAnnotation,
     ELNComponentEnum,
-    SectionProperties,
     Filter,
+    SectionProperties,
 )
-from nomad.datamodel.metainfo.plot import PlotSection
 from nomad.datamodel.metainfo.basesections.v2 import Process
-
-
+from nomad.datamodel.metainfo.plot import PlotSection
+from nomad.metainfo import Quantity, SchemaPackage, Section
 
 configuration = config.get_plugin_entry_point(
     "nomad_age.schema_packages:field_cooling_schema_entry_point"
