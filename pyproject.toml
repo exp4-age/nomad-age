@@ -109,6 +109,7 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [project.entry-points.'nomad.plugin']
+age_samples = "nomad_age.apps:age_samples"
 age_schema_entry_point = "nomad_age.schema_packages:age_schema_entry_point"
 lmoke_parser_entry_point = "nomad_age.parsers:lmoke_parser_entry_point"
 lmokeandvmoke_schema_entry_point = "nomad_age.schema_packages:lmokeandvmoke_schema_entry_point"
