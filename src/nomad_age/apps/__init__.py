@@ -75,7 +75,7 @@ age_samples = AppEntryPoint(
                     "title": "Sample ID",
                     "show_input": True,
                     "layout": {
-                        "lg": {"minH": 3, "minW": 3, "h": 3, "w": 6, "x": 6, "y": 0},
+                        "lg": {"minH": 5, "minW": 3, "h": 5, "w": 6, "x": 6, "y": 0},
                     },
                     "query_mode": "or",
                 },
@@ -85,7 +85,7 @@ age_samples = AppEntryPoint(
                     "title": "Sample state",
                     "show_input": True,
                     "layout": {
-                        "lg": {"minH": 3, "minW": 3, "h": 3, "w": 6, "x": 6, "y": 0},
+                        "lg": {"minH": 5, "minW": 3, "h": 5, "w": 6, "x": 6, "y": 0},
                     },
                 },
             ]
