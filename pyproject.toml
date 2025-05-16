@@ -122,7 +122,7 @@ field_cooling_parser_entry_point = "nomad_age.parsers:field_cooling_parser_entry
 skip = [".github/*"]
 
 [tool.uv.sources]
-nomad-lab = { workspace = true}
+nomad-lab = { index = "nomad-lab"}
 
 [[tool.uv.index]]
 name = "nomad-lab"

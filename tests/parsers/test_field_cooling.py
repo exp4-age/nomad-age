@@ -1,10 +1,11 @@
 import logging
 from datetime import datetime, timezone
+
 from nomad.datamodel import EntryArchive
-from nomad_age.parsers.field_cooling_parser import FieldCoolingParser
-from nomad.units import ureg
-import pytest
 from nomad.metainfo.util import MSubSectionList
+from nomad.units import ureg
+
+from nomad_age.parsers.field_cooling_parser import FieldCoolingParser
 
 
 def test_field_cooling_parser():
@@ -23,7 +24,7 @@ def test_field_cooling_parser():
     # Test metadata parsing
     # TODO: Samples
     assert isinstance(entry.samples, MSubSectionList)
-    assert [sample.name for sample in entry.samples] == ['2024_0207', '2024_0208 2nd time']
+    assert [sample.name for sample in entry.samples] == ['2024_0207', '2024_0208']
     assert entry.experiment_date == datetime(
         2024, 10, 18, 17, 37, 59, tzinfo=timezone.utc
     )
