@@ -1,11 +1,14 @@
 from nomad.config import config
+from nomad.datamodel.data import EntryData
 from nomad.datamodel.metainfo.annotations import (
     ELNAnnotation,
     ELNComponentEnum,
     Filter,
     SectionProperties,
 )
-from nomad.datamodel.metainfo.basesections.v2 import Process
+from nomad.datamodel.metainfo.basesections.v1 import Process
+
+# from nomad.datamodel.metainfo.basesections.v2 import Process
 from nomad.datamodel.metainfo.plot import PlotSection
 from nomad.metainfo import Quantity, SchemaPackage, Section
 
@@ -16,7 +19,7 @@ configuration = config.get_plugin_entry_point(
 m_package = SchemaPackage(name="field_cooling_schema")
 
 
-class FieldCoolingEntry(PlotSection, Process):
+class FieldCoolingEntry(PlotSection, Process, EntryData):
     m_def = Section(
         label="Field Cooling",
         description="A Field Cooling process.",
@@ -24,6 +27,9 @@ class FieldCoolingEntry(PlotSection, Process):
             properties=SectionProperties(visible=Filter(exclude=["lab_id"]))
         ),
     )
+
+    def normalize(self, archive, logger) -> None:
+        pass
 
     blocking_temperature = Quantity(
         type=float,

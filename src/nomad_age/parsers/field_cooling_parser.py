@@ -9,7 +9,7 @@ from nomad.datamodel.metainfo.plot import PlotlyFigure
 from nomad.parsing import MatchingParser
 from plotly.subplots import make_subplots
 
-from ..schema_packages.field_cooling_schema import FieldCoolingEntry
+from nomad_age.schema_packages.field_cooling_schema import FieldCoolingEntry
 
 configuration = config.get_plugin_entry_point(
     'nomad_age.parsers:field_cooling_parser_entry_point'
