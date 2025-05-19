@@ -3,7 +3,7 @@ from nomad.datamodel import EntryData
 from nomad.datamodel.metainfo.annotations import ELNAnnotation, ELNComponentEnum
 
 # from nomad.datamodel.metainfo.basesections.v2 import System
-from nomad.datamodel.metainfo.basesections.v1 import CompositeSystem
+from nomad.datamodel.metainfo.basesections import CompositeSystem
 from nomad.metainfo import MEnum, Quantity, SchemaPackage, Section
 
 configuration = config.get_plugin_entry_point(
