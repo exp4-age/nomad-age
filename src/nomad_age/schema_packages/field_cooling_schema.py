@@ -7,7 +7,7 @@ from nomad.datamodel.metainfo.annotations import (
     SectionProperties,
 )
 
-from nomad.datamodel.metainfo.basesections.v1 import Process
+from nomad.datamodel.metainfo.basesections import Process
 
 # from nomad.datamodel.metainfo.basesections.v2 import Process
 from nomad.datamodel.metainfo.plot import PlotSection
