@@ -6,7 +6,6 @@ from nomad.datamodel.metainfo.annotations import (
     Filter,
     SectionProperties,
 )
-
 from nomad.datamodel.metainfo.basesections import Process
 
 # from nomad.datamodel.metainfo.basesections.v2 import Process

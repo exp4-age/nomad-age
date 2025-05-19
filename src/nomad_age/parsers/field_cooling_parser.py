@@ -1,7 +1,6 @@
 import re
 from datetime import datetime, timedelta
 
-
 import numpy as np
 import plotly.graph_objects as go
 from nomad.config import config
@@ -11,7 +10,6 @@ from nomad.parsing import MatchingParser
 from plotly.subplots import make_subplots
 
 from nomad_age.schema_packages.field_cooling_schema import FieldCoolingEntry
-
 
 configuration = config.get_plugin_entry_point(
     'nomad_age.parsers:field_cooling_parser_entry_point'
