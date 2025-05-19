@@ -31,7 +31,6 @@ app_entry_point = AppEntryPoint(
     ),
 )
 
-
 sample_schema = "nomad_age.schema_packages.age_schema.AGE_Sample"
 age_samples = AppEntryPoint(
     name="age_samples",
@@ -65,10 +64,12 @@ age_samples = AppEntryPoint(
                 ),
                 MenuItemTerms(
                     quantity=f"data.state#{sample_schema}",
+
                 ),
             ],
         ),
         dashboard={
+
             "widgets": [
                 {
                     "type": "terms",

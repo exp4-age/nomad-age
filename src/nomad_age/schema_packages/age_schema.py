@@ -21,5 +21,4 @@ class AGE_Sample(CompositeSystem, EntryData):
         description="Sample state",
         a_eln=ELNAnnotation(component=ELNComponentEnum.EnumEditQuantity),
     )
-
 m_package.__init_metainfo__()

@@ -6,6 +6,7 @@ from nomad.datamodel.metainfo.annotations import (
     Filter,
     SectionProperties,
 )
+
 from nomad.datamodel.metainfo.basesections.v1 import Process
 
 # from nomad.datamodel.metainfo.basesections.v2 import Process
@@ -60,6 +61,7 @@ class FieldCoolingEntry(PlotSection, Process, EntryData):
         shape=["*"],
         unit="s",
         description="Time series",
+
     )
 
     measured_temperature = Quantity(
