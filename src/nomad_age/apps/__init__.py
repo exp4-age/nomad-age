@@ -11,84 +11,85 @@ from nomad.config.models.ui import (
 )
 
 app_entry_point = AppEntryPoint(
-    name='NewApp',
-    description='New app entry point configuration.',
+    name="NewApp",
+    description="New app entry point configuration.",
     app=App(
-        label='NewApp',
-        path='app',
-        category='simulation',
+        label="NewApp",
+        path="app",
+        category="simulation",
         columns=Columns(
-            selected=['entry_id'],
+            selected=["entry_id"],
             options={
-                'entry_id': Column(),
+                "entry_id": Column(),
             },
         ),
         filter_menus=FilterMenus(
             options={
-                'material': FilterMenu(label='Material'),
+                "material": FilterMenu(label="Material"),
             }
         ),
     ),
 )
 
-
+sample_schema = "nomad_age.schema_packages.age_schema.AGE_Sample"
 age_samples = AppEntryPoint(
-    name='age_samples',
-    description='AGE sample database.',
+    name="age_samples",
+    description="AGE sample database.",
     app=App(
-        label='AGE Samples',
-        path='age_samples',
-        category='Experiment',
-        description='AGE samples database, used to find all our samples',
+        label="AGE Samples",
+        path="age_samples",
+        category="Experiment",
+        description="AGE samples database, used to find all our samples",
         search_quantities=SearchQuantities(
-            include=['*nomad_age.schema_packages.age_schema.Sample']
+            include=[sample_schema]
         ),
         filters_locked={
-            'section_defs.definition_qualified_name': [
-                'nomad_age.schema_packages.age_schema.Sample'
+            "section_defs.definition_qualified_name": [
+                sample_schema
             ]
         },
         columns=Columns(
-            selected=['name', 'comment', 'state', 'entry_type'],
+            selected=["lab_id", "state", "entry_type"],
             options={
-                'entry_type': Column(quantity='entry_type', label='Type'),
-                'name': Column(quantity='data.name', label='Sample name'),
-                'comment': Column(quantity='data.comment', label='Sample comment'),
-                'state': Column(quantity='data.state', label='Sample state'),
+                "entry_type": Column(quantity="entry_type", label="Type"),
+                "lab_id": Column(quantity="data.lab_id", label="Sample ID"),
+                "state": Column(quantity="data.state", label="Sample state"),
             },
         ),
         menu=Menu(
-            title='Sample',
+            title="Sample",
             items=[
                 MenuItemTerms(
-                    quantity='data.name#nomad_age.schema_packages.age_schema.Sample',
+                    quantity=f"data.lab_id#{sample_schema}",
                 ),
                 MenuItemTerms(
-                    quantity='data.state#nomad_age.schema_packages.age_schema.Sample',
+                    quantity=f"data.state#{sample_schema}",
+
                 ),
             ],
         ),
         dashboard={
-            'widgets': [
+
+            "widgets": [
                 {
-                    'type': 'terms',
-                    'search_quantity':
-                    'data.name#nomad_age.schema_packages.age_schema.Sample',
-                    'title': 'Sample name',
-                    'show_input': True,
-                    'layout': {
-                        'lg': {'minH': 3, 'minW': 3, 'h': 3, 'w': 6, 'x': 6, 'y': 0},
+                    "type": "terms",
+                    "search_quantity":
+                    f"data.lab_id#{sample_schema}",
+                    "title": "Sample ID",
+                    "show_input": True,
+                    "layout": {
+                        "lg": {"minH": 5, "minW": 3, "h": 5, "w": 6, "x": 6, "y": 0},
                     },
-                    'query_mode': 'or',
+                    "query_mode": "or",
                 },
                 {
-                    'type': 'terms',
-                    'search_quantity':
-                    'data.state#nomad_age.schema_packages.age_schema.Sample',
-                    'title': 'Sample state',
-                    'show_input': True,
-                    'layout': {
-                        'lg': {'minH': 3, 'minW': 3, 'h': 3, 'w': 6, 'x': 6, 'y': 0},
+                    "type": "terms",
+                    "search_quantity":
+                    f"data.state#{sample_schema}",
+                    "title": "Sample state",
+                    "show_input": True,
+                    "layout": {
+                        "lg": {"minH": 5, "minW": 3, "h": 5, "w": 6, "x": 6, "y": 0},
                     },
                 },
             ]

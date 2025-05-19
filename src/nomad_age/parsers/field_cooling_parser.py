@@ -1,5 +1,6 @@
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
+
 
 import numpy as np
 import plotly.graph_objects as go
@@ -9,9 +10,8 @@ from nomad.datamodel.metainfo.plot import PlotlyFigure
 from nomad.parsing import MatchingParser
 from plotly.subplots import make_subplots
 
-from nomad_age.schema_packages.age_schema import Sample
+from nomad_age.schema_packages.field_cooling_schema import FieldCoolingEntry
 
-from ..schema_packages.field_cooling_schema import FieldCoolingEntry
 
 configuration = config.get_plugin_entry_point(
     'nomad_age.parsers:field_cooling_parser_entry_point'
@@ -27,7 +27,7 @@ def parse_date(date_str: str) -> datetime:
 def plot_field_cooling_data(
     time, measured_temperature, target_temperature, pirani_pressure, penning_pressure
 ) -> list[PlotlyFigure]:
-    fig = make_subplots(specs=[[{'secondary_y': True}]])
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
 
     # Temperature traces
     fig.add_trace(
@@ -38,7 +38,8 @@ def plot_field_cooling_data(
             name='Measured Temperature',
             yaxis='y1',
         ),
-        secondary_y=False,
+            secondary_y=False
+
     )
     fig.add_trace(
         go.Scatter(
@@ -49,7 +50,7 @@ def plot_field_cooling_data(
             line=dict(dash='dash'),
             yaxis='y1',
         ),
-        secondary_y=False,
+        secondary_y=False
     )
 
     fig.add_trace(
@@ -59,7 +60,7 @@ def plot_field_cooling_data(
             mode='lines',
             name='Pirani Pressure',
         ),
-        secondary_y=True,
+        secondary_y = True
     )
 
     # Layout with two y-axes
@@ -80,8 +81,7 @@ def plot_field_cooling_data(
             yanchor='bottom',
             y=1.01,
             xanchor='right',
-            x=1,
-        ),
+            x=1,)
     )
 
     return fig
@@ -95,7 +95,10 @@ class FieldCoolingParser(MatchingParser):
         )
         entry = FieldCoolingEntry()
         archive.data = entry
-        entry.name = f'FC_{mainfile.split("/")[-1].split(".")[0]}'
+        entry.name = f'FC_{mainfile.split("/")[-1].split(".DAT")[0]}'
+        entry.method = "Fieldcooling"
+        entry.instrument = "Fieldcooling"
+        entry.location = "BAHAMAS"
 
         with open(mainfile, encoding='latin1') as f:
             content = f.read()
@@ -103,14 +106,16 @@ class FieldCoolingParser(MatchingParser):
         # Parse metadata
         for line in content.split('\n'):
             if 'Probenname:' in line:
+                # match on 4 numbers underscore 4 numbers,
+                # then optional underscore one number.
                 # Can repeat for multiple samples
-                sample_names = re.findall(r'\d{4}_\d{4}_?\d?', line.split(':')[1])
-                entry.samples = [
-                    Sample(name=name, state='after FC', comment='')
-                    for name in sample_names
-                ]
+                # sample_names = re.findall(r'\d{4}_\d{4}_?\d?', line.split(':')[1])
+                # entry.samples = [System(name=name,
+                # description="after FC") for name in sample_names]
+                pass
             elif 'Datum:' in line:
-                entry.experiment_date = parse_date(line.split(':', 1)[1].strip())
+                start_time = parse_date(line.split(':', 1)[1].strip())
+                entry.datetime = start_time
             elif 'T(Blocking)' in line:
                 entry.blocking_temperature = float(line.split(':')[1])
             elif 'Plateuzeit' in line:
@@ -135,6 +140,8 @@ class FieldCoolingParser(MatchingParser):
         if data_table:
             data = np.array(data_table)
             entry.time = data[:, 0].tolist()
+            if start_time:
+                entry.end_time = start_time + timedelta(seconds=data[:,0].tolist()[-1])
             entry.measured_temperature = data[:, 1].tolist()
             entry.target_temperature = data[:, 2].tolist()
             entry.pirani_pressure = data[:, 3].tolist()
