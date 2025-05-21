@@ -93,6 +93,7 @@ class FieldCoolingParser(MatchingParser):
         )
         entry = FieldCoolingEntry()
         archive.data = entry
+        archive.metadata.entry_type = "AGE_FieldCooling"
         entry.name = f'FC_{mainfile.split("/")[-1].split(".DAT")[0]}'
         entry.method = "Fieldcooling"
         entry.instrument = "Fieldcooling"
