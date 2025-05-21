@@ -19,7 +19,7 @@ configuration = config.get_plugin_entry_point(
 m_package = SchemaPackage(name="field_cooling_schema")
 
 
-class FieldCoolingEntry(PlotSection, Process, EntryData):
+class AGE_FieldCooling(PlotSection, Process, EntryData):
     m_def = Section(
         label="Field Cooling",
         description="A Field Cooling process.",
