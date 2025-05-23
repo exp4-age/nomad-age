@@ -1,7 +1,5 @@
 import math
 
-from nomad.app.v1.models.models import MetadataResponse
-from nomad.search import search
 from nomad.utils import hash
 
 
@@ -72,8 +70,10 @@ def create_archive(entity, archive, file_name, *, overwrite: bool = False):
     return False
 
 
-def find_existing_AGE_sample(lab_id: str) -> MetadataResponse:
+def find_existing_AGE_sample(lab_id: str):
     """Searches all entries in the database for matching lab_id."""
+    from nomad.search import search
+
     query = {'results.eln.lab_ids': lab_id}
     search_result = search(query=query, owner='visible')
     return search_result

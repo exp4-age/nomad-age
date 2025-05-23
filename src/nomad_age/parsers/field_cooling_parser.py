@@ -129,7 +129,7 @@ def plot_field_cooling_data(
 
 
 class FieldCoolingParser(MatchingParser):
-    def parse(self, mainfile: str, archive: 'EntryArchive', logger):
+    def parse(self, mainfile: str, archive: EntryArchive, logger):
         logger.info(
             f'FieldCoolingParser called on {mainfile}',
             configuration=configuration.parameter,
