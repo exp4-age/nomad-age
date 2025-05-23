@@ -1,21 +1,62 @@
+import os
 import re
+import sys
 from datetime import datetime, timedelta
 
 import numpy as np
 import plotly.graph_objects as go
 from nomad.config import config
-from nomad.datamodel import EntryArchive, EntryMetadata
+from nomad.datamodel import EntryArchive
 from nomad.datamodel.metainfo.plot import PlotlyFigure
 from nomad.parsing import MatchingParser
 from plotly.subplots import make_subplots
 
-from nomad_age.parsers.utils import create_archive
-from nomad_age.schema_packages.age_schema import AGE_Sample, AGE_Sample_Reference
+from nomad_age.schema_packages.age_schema import (
+    AGE_RawFile,
+    AGE_Sample,
+    AGE_Sample_Reference,
+)
 from nomad_age.schema_packages.field_cooling_schema import AGE_FieldCooling
+from nomad_age.utils.utils import (
+    create_archive,
+    find_existing_AGE_sample,
+    get_entry_id,
+    get_hash_ref,
+)
 
 configuration = config.get_plugin_entry_point(
     'nomad_age.parsers:field_cooling_parser_entry_point'
 )
+
+
+def update_entry(entry, eid, archive, logger):
+    """Update the entries with the new archive."""
+    from nomad import files
+    from nomad.search import search
+
+    query = {
+        'entry_id': eid,
+    }
+    search_result = search(
+        owner='all', query=query, user_id=archive.metadata.main_author.user_id
+    )
+    new_entry_dict = entry.m_to_dict()
+    res = search_result.data[0]
+    try:
+        # Open Archives
+        with files.UploadFiles.get(upload_id=res['upload_id']).read_archive(
+            entry_id=res['entry_id']
+        ) as ar:
+            entry_id = res['entry_id']
+            entry_data = ar[entry_id]['data']
+            entry_data.pop('m_def', None)
+            new_entry_dict.update(entry_data)
+    except Exception as e:
+        logger.error('Error in processing data: ', e)
+    new_entry = getattr(sys.modules[__name__], type(entry).__name__).m_from_dict(
+        new_entry_dict
+    )
+    return new_entry
 
 
 def parse_date(date_str: str) -> datetime:
@@ -93,11 +134,17 @@ class FieldCoolingParser(MatchingParser):
             f'FieldCoolingParser called on {mainfile}',
             configuration=configuration.parameter,
         )
+        """
+        Create a new entry for the field cooling data.
+        Later create a new archive out of this.
+        Everyting called archive in here, is the original .DAT logfile!
+        """
+        uid = archive.metadata.upload_id
         entry = AGE_FieldCooling()
-        archive.data = entry
-        archive.metadata.entry_type = "AGE_FieldCooling"
-        entry.name = f'FC_{mainfile.split("/")[-1].split(".DAT")[0]}'
-        entry.method = 'Fieldcooling'
+        entry_file_name = f'{os.path.basename(mainfile)}.archive.yaml'
+        eid = get_entry_id(uid, entry_file_name)
+        entry.data_file = os.path.basename(mainfile)  # the original log file
+
         entry.instrument = 'Fieldcooling'
         entry.location = 'BAHAMAS'
 
@@ -105,31 +152,33 @@ class FieldCoolingParser(MatchingParser):
             content = f.read()
 
         # Parse metadata
-        sample_refs = []
+        start_time = None
         for line in content.split('\n'):
             if 'Probenname:' in line:
                 sample_names = re.findall(r'\d{4}_\d{4}_?\d?', line.split(':')[1])
                 for id in sample_names:
-                    # TODO: Move this into normalizer!
-                    # TODO: Check if the sample already exists somewhere
-                    # Then update and put reference
-                    SampleArchive = EntryArchive(
-                        data=AGE_Sample(lab_id=id, state='after FC'),
-                        m_context=archive.m_context,
-                        metadata=EntryMetadata(upload_id=archive.m_context.upload_id),
-                    )
-                    sample_ref = create_archive(
-                        SampleArchive.m_to_dict(),
-                        archive.m_context,
-                        f'{id}.archive.yaml',
-                        'yaml',
-                        logger,
-                    )
-                    sample_refs.append(
-                        AGE_Sample_Reference(name=id,
-                                             lab_id=id,
-                                             reference=sample_ref)
-                    )
+                    existing_sample = find_existing_AGE_sample(id)
+                    if len(existing_sample.data) == 1:  # already exists
+                        entry.samples.append(
+                            AGE_Sample_Reference(
+                                reference=get_hash_ref(uid, f'{id}.archive.yaml')
+                            )
+                        )
+                    elif len(existing_sample.data) == 0:  # does not exist
+                        SampleArchive = AGE_Sample(name=id, lab_id=id, state='after FC')
+                        create_archive(
+                            SampleArchive,
+                            archive,
+                            f'{id}.archive.yaml',
+                        )
+                        sample = get_hash_ref(uid, f'{id}.archive.yaml')
+                        entry.samples.append(
+                            AGE_Sample_Reference(name=id, lab_id=id, reference=sample)
+                        )
+                    else:
+                        raise ValueError(
+                            'Two samples have the same ID. Something went wrong'
+                        )
             elif 'Datum:' in line:
                 start_time = parse_date(line.split(':', 1)[1].strip())
                 entry.datetime = start_time
@@ -140,7 +189,12 @@ class FieldCoolingParser(MatchingParser):
             elif 'hlrate [' in line:  # circumventing issues with the umlaut
                 entry.cooling_rate = float(line.split(':')[1].replace(',', '.'))
 
-        entry.samples = sample_refs
+        if start_time:
+            name = f'FC_{start_time}'
+        else:
+            name = f'FC_{mainfile.split("/")[-1].split(".DAT")[0]}'
+        entry.name = name
+
         # Parse time-series data
         data_table = []
         in_data_section = False
@@ -175,3 +229,10 @@ class FieldCoolingParser(MatchingParser):
             entry.figures = [
                 PlotlyFigure(label='Field Cooling Plot', figure=fig.to_plotly_json())
             ]
+        raw_file = AGE_RawFile(processed_archive=get_hash_ref(uid, entry_file_name))
+        archive.data = raw_file
+        new_entry_created = create_archive(entry, archive, entry_file_name)
+        if not new_entry_created:
+            new_entry = update_entry(entry, eid, archive, logger)
+            if new_entry is not None:
+                create_archive(new_entry, archive, entry_file_name, overwrite=True)
