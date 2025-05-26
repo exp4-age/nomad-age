@@ -1,4 +1,6 @@
+import os
 import re
+import sys
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -9,11 +11,52 @@ from nomad.datamodel.metainfo.plot import PlotlyFigure
 from nomad.parsing import MatchingParser
 from plotly.subplots import make_subplots
 
-from nomad_age.schema_packages.field_cooling_schema import FieldCoolingEntry
+from nomad_age.schema_packages.age_schema import (
+    AGE_RawFile,
+    AGE_Sample,
+    AGE_Sample_Reference,
+)
+from nomad_age.schema_packages.field_cooling_schema import AGE_FieldCooling
+from nomad_age.utils.utils import (
+    create_archive,
+    find_existing_AGE_sample,
+    get_entry_id,
+    get_hash_ref,
+)
 
 configuration = config.get_plugin_entry_point(
     'nomad_age.parsers:field_cooling_parser_entry_point'
 )
+
+
+def update_entry(entry, eid, archive, logger):
+    """Update the entries with the new archive."""
+    from nomad import files
+    from nomad.search import search
+
+    query = {
+        'entry_id': eid,
+    }
+    search_result = search(
+        owner='all', query=query, user_id=archive.metadata.main_author.user_id
+    )
+    new_entry_dict = entry.m_to_dict()
+    res = search_result.data[0]
+    try:
+        # Open Archives
+        with files.UploadFiles.get(upload_id=res['upload_id']).read_archive(
+            entry_id=res['entry_id']
+        ) as ar:
+            entry_id = res['entry_id']
+            entry_data = ar[entry_id]['data']
+            entry_data.pop('m_def', None)
+            new_entry_dict.update(entry_data)
+    except Exception as e:
+        logger.error('Error in processing data: ', e)
+    new_entry = getattr(sys.modules[__name__], type(entry).__name__).m_from_dict(
+        new_entry_dict
+    )
+    return new_entry
 
 
 def parse_date(date_str: str) -> datetime:
@@ -24,8 +67,8 @@ def parse_date(date_str: str) -> datetime:
 
 def plot_field_cooling_data(
     time, measured_temperature, target_temperature, pirani_pressure, penning_pressure
-) -> list[PlotlyFigure]:
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
+) -> PlotlyFigure:
+    fig = make_subplots(specs=[[{'secondary_y': True}]])
 
     # Temperature traces
     fig.add_trace(
@@ -36,8 +79,7 @@ def plot_field_cooling_data(
             name='Measured Temperature',
             yaxis='y1',
         ),
-            secondary_y=False
-
+        secondary_y=False,
     )
     fig.add_trace(
         go.Scatter(
@@ -48,7 +90,7 @@ def plot_field_cooling_data(
             line=dict(dash='dash'),
             yaxis='y1',
         ),
-        secondary_y=False
+        secondary_y=False,
     )
 
     fig.add_trace(
@@ -58,7 +100,7 @@ def plot_field_cooling_data(
             mode='lines',
             name='Pirani Pressure',
         ),
-        secondary_y = True
+        secondary_y=True,
     )
 
     # Layout with two y-axes
@@ -79,38 +121,53 @@ def plot_field_cooling_data(
             yanchor='bottom',
             y=1.01,
             xanchor='right',
-            x=1,)
+            x=1,
+        ),
     )
 
     return fig
 
 
 class FieldCoolingParser(MatchingParser):
-    def parse(self, mainfile: str, archive: 'EntryArchive', logger):
+    def parse(self, mainfile: str, archive: EntryArchive, logger):
         logger.info(
             f'FieldCoolingParser called on {mainfile}',
             configuration=configuration.parameter,
         )
-        entry = FieldCoolingEntry()
-        archive.data = entry
-        entry.name = f'FC_{mainfile.split("/")[-1].split(".DAT")[0]}'
-        entry.method = "Fieldcooling"
-        entry.instrument = "Fieldcooling"
-        entry.location = "BAHAMAS"
+        """
+        Create a new entry for the field cooling data.
+        Later create a new archive out of this.
+        Everyting called archive in here, is the original .DAT logfile!
+        """
+        uid = archive.metadata.upload_id
+        entry = AGE_FieldCooling()
+        entry_file_name = f'{os.path.basename(mainfile)}.archive.yaml'
+        eid = get_entry_id(uid, entry_file_name)
+        entry.data_file = os.path.basename(mainfile)  # the original log file
+
+        entry.instrument = 'Fieldcooling'
+        entry.location = 'BAHAMAS'
 
         with open(mainfile, encoding='latin1') as f:
             content = f.read()
 
         # Parse metadata
+        start_time = None
+        sample_names = []
         for line in content.split('\n'):
             if 'Probenname:' in line:
-                # match on 4 numbers underscore 4 numbers,
-                # then optional underscore one number.
-                # Can repeat for multiple samples
-                # sample_names = re.findall(r'\d{4}_\d{4}_?\d?', line.split(':')[1])
-                # entry.samples = [System(name=name,
-                # description="after FC") for name in sample_names]
-                pass
+                lineend = line.split(':')[1].strip()
+                sample_names = re.findall(r'\d{4}_\d{4}_?\d?', lineend)
+                if not sample_names:
+                    # If there is no sample name found, it's probably only a comment
+                    entry.description = line.split(':')[1].strip()
+                else:
+                    # Ceck if there is more text than just the sample names
+                    rest = re.sub(r'\d{4}_\d{4}_?\d?|,', '', lineend)
+                    if (
+                        len(rest.strip()) > 0
+                    ):  # if there is more than just the sample, add it to description
+                        entry.description = lineend
             elif 'Datum:' in line:
                 start_time = parse_date(line.split(':', 1)[1].strip())
                 entry.datetime = start_time
@@ -120,6 +177,12 @@ class FieldCoolingParser(MatchingParser):
                 entry.plateau_duration = float(line.split(':')[1].replace(',', '.'))
             elif 'hlrate [' in line:  # circumventing issues with the umlaut
                 entry.cooling_rate = float(line.split(':')[1].replace(',', '.'))
+
+        if start_time:
+            name = f'FC_{start_time}'
+        else:
+            name = f'FC_{mainfile.split("/")[-1].split(".DAT")[0]}'
+        entry.name = name
 
         # Parse time-series data
         data_table = []
@@ -139,7 +202,7 @@ class FieldCoolingParser(MatchingParser):
             data = np.array(data_table)
             entry.time = data[:, 0].tolist()
             if start_time:
-                entry.end_time = start_time + timedelta(seconds=data[:,0].tolist()[-1])
+                entry.end_time = start_time + timedelta(seconds=data[:, 0].tolist()[-1])
             entry.measured_temperature = data[:, 1].tolist()
             entry.target_temperature = data[:, 2].tolist()
             entry.pirani_pressure = data[:, 3].tolist()
@@ -155,3 +218,35 @@ class FieldCoolingParser(MatchingParser):
             entry.figures = [
                 PlotlyFigure(label='Field Cooling Plot', figure=fig.to_plotly_json())
             ]
+
+        # Create AGE_Sample_Reference entries for each sample
+        # If it doesn't exist, create a new AGE_Sample
+        for id in sample_names:
+            existing_sample = find_existing_AGE_sample(id)
+            if len(existing_sample.data) == 1:  # already exists
+                entry.samples.append(
+                    AGE_Sample_Reference(
+                        reference=get_hash_ref(uid, f'{id}.archive.yaml')
+                    )
+                )
+            elif len(existing_sample.data) == 0:  # does not exist
+                SampleArchive = AGE_Sample(name=id, lab_id=id, state='after FC')
+                create_archive(
+                    SampleArchive,
+                    archive,
+                    f'{id}.archive.yaml',
+                )
+                sample = get_hash_ref(uid, f'{id}.archive.yaml')
+                entry.samples.append(
+                    AGE_Sample_Reference(name=id, lab_id=id, reference=sample)
+                )
+            else:
+                raise ValueError('Two samples have the same ID. Something went wrong')
+
+        raw_file = AGE_RawFile(processed_archive=get_hash_ref(uid, entry_file_name))
+        archive.data = raw_file
+        new_entry_created = create_archive(entry, archive, entry_file_name)
+        if not new_entry_created:
+            new_entry = update_entry(entry, eid, archive, logger)
+            if new_entry is not None:
+                create_archive(new_entry, archive, entry_file_name, overwrite=True)
