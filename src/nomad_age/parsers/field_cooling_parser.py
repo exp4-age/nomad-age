@@ -67,7 +67,7 @@ def parse_date(date_str: str) -> datetime:
 
 def plot_field_cooling_data(
     time, measured_temperature, target_temperature, pirani_pressure, penning_pressure
-) -> list[PlotlyFigure]:
+) -> PlotlyFigure:
     fig = make_subplots(specs=[[{'secondary_y': True}]])
 
     # Temperature traces
@@ -153,32 +153,21 @@ class FieldCoolingParser(MatchingParser):
 
         # Parse metadata
         start_time = None
+        sample_names = []
         for line in content.split('\n'):
             if 'Probenname:' in line:
-                sample_names = re.findall(r'\d{4}_\d{4}_?\d?', line.split(':')[1])
-                for id in sample_names:
-                    existing_sample = find_existing_AGE_sample(id)
-                    if len(existing_sample.data) == 1:  # already exists
-                        entry.samples.append(
-                            AGE_Sample_Reference(
-                                reference=get_hash_ref(uid, f'{id}.archive.yaml')
-                            )
-                        )
-                    elif len(existing_sample.data) == 0:  # does not exist
-                        SampleArchive = AGE_Sample(name=id, lab_id=id, state='after FC')
-                        create_archive(
-                            SampleArchive,
-                            archive,
-                            f'{id}.archive.yaml',
-                        )
-                        sample = get_hash_ref(uid, f'{id}.archive.yaml')
-                        entry.samples.append(
-                            AGE_Sample_Reference(name=id, lab_id=id, reference=sample)
-                        )
-                    else:
-                        raise ValueError(
-                            'Two samples have the same ID. Something went wrong'
-                        )
+                lineend = line.split(':')[1].strip()
+                sample_names = re.findall(r'\d{4}_\d{4}_?\d?', lineend)
+                if not sample_names:
+                    # If there is no sample name found, it's probably only a comment
+                    entry.description = line.split(':')[1].strip()
+                else:
+                    # Ceck if there is more text than just the sample names
+                    rest = re.sub(r'\d{4}_\d{4}_?\d?|,', '', lineend)
+                    if (
+                        len(rest.strip()) > 0
+                    ):  # if there is more than just the sample, add it to description
+                        entry.description = lineend
             elif 'Datum:' in line:
                 start_time = parse_date(line.split(':', 1)[1].strip())
                 entry.datetime = start_time
@@ -229,6 +218,31 @@ class FieldCoolingParser(MatchingParser):
             entry.figures = [
                 PlotlyFigure(label='Field Cooling Plot', figure=fig.to_plotly_json())
             ]
+
+        # Create AGE_Sample_Reference entries for each sample
+        # If it doesn't exist, create a new AGE_Sample
+        for id in sample_names:
+            existing_sample = find_existing_AGE_sample(id)
+            if len(existing_sample.data) == 1:  # already exists
+                entry.samples.append(
+                    AGE_Sample_Reference(
+                        reference=get_hash_ref(uid, f'{id}.archive.yaml')
+                    )
+                )
+            elif len(existing_sample.data) == 0:  # does not exist
+                SampleArchive = AGE_Sample(name=id, lab_id=id, state='after FC')
+                create_archive(
+                    SampleArchive,
+                    archive,
+                    f'{id}.archive.yaml',
+                )
+                sample = get_hash_ref(uid, f'{id}.archive.yaml')
+                entry.samples.append(
+                    AGE_Sample_Reference(name=id, lab_id=id, reference=sample)
+                )
+            else:
+                raise ValueError('Two samples have the same ID. Something went wrong')
+
         raw_file = AGE_RawFile(processed_archive=get_hash_ref(uid, entry_file_name))
         archive.data = raw_file
         new_entry_created = create_archive(entry, archive, entry_file_name)
