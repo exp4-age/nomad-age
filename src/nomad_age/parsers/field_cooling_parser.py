@@ -96,9 +96,9 @@ def plot_field_cooling_data(
     fig.add_trace(
         go.Scatter(
             x=time,
-            y=pirani_pressure,
+            y=penning_pressure,
             mode='lines',
-            name='Pirani Pressure',
+            name='Penning Pressure',
         ),
         secondary_y=True,
     )
@@ -107,7 +107,7 @@ def plot_field_cooling_data(
     fig.update_layout(
         # title='Field Cooling: Temperature and Pressure over Time',
         showlegend=True,
-        xaxis=dict(title='Time (s)'),
+        xaxis=dict(title='Time (s)', fixedrange=False),
         yaxis=dict(title='Temperature (°C)', side='left'),
         yaxis2=dict(
             title='Pressure (mbar)',
@@ -115,6 +115,7 @@ def plot_field_cooling_data(
             side='right',
             overlaying='y',
             zeroline=False,
+            tickformat='.2e',  # Format pressure ticks to 2 decimal places
         ),
         legend=dict(
             orientation='h',
