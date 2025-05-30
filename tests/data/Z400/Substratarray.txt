@@ -1,0 +1,28 @@
+1	Si 100
+2	Kapton
+3	Glas BK7
+4	Glas Objekttraeger
+5	M10 10.9 Stahlschrauben
+6	Si3N4 (50 nm) auf Si 100
+7	SiO2, thermisch oxidiert
+8	PDMS
+9	c-cut Sapphire
+10	Si + Photoresist
+11	Borofloat poliert
+12	aluminium foil
+13	Si3N4-TEM window, 100nm
+15	Si(100) / PMMA / AMONIL
+16	Saphir
+17	glass with silica beads
+18	Si/SiO2 (100 nm)
+19	Glass w/ PMMA part and PV
+20	None
+21	cover slip
+22	Azo structur on glass
+23	Si 100, mit Pt (3min/15 m
+24	Borosilikat Glas
+25	glass + IP-Dip2
+26	Si + IP-Dip2
+27	Nb
+28	Si + PVA +IP-Dip2
+29	glass + PVA +IP-Dip2

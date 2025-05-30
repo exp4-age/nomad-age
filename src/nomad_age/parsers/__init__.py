@@ -34,3 +34,35 @@ lmoke_parser_entry_point = LMOKEParserEntryPoint(
     mainfile_contents_re=r'#\s+Meas\.\s+type\s+',
     # this is a regular expression that matches the contents of the mainfile
 )
+
+
+class FieldCoolingParserEntryPoint(ParserEntryPoint):
+    parameter: int = Field(0, description='Custom configuration parameter')
+
+    def load(self):
+        from nomad_age.parsers.field_cooling_parser import FieldCoolingParser
+
+        return FieldCoolingParser(**self.dict())
+
+
+field_cooling_parser_entry_point = FieldCoolingParserEntryPoint(
+    name='FieldCoolingParser',
+    description='Field Cooling parser entry point configuration.',
+    mainfile_name_re=r'.*\.(DAT|dat)$',
+    mainfile_contents_re=r'#\s+FC-Protokoll\s+#',
+)
+
+class Z400ParserEntryPoint(ParserEntryPoint):
+    parameter: int = Field(0, description='Custom configuration parameter')
+
+    def load(self):
+        from nomad_age.parsers.Z400_parser import Z400Parser
+
+        return Z400Parser(**self.dict())
+
+
+Z400_parser_entry_point = Z400ParserEntryPoint(
+    name='Z400Parser',
+    description='Z400 parser entry point configuration.',
+    mainfile_name_re=r'\d{4}_\d{4}_\d{1}.asc',
+)

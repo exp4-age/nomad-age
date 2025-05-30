@@ -1,430 +1,385 @@
-from nomad.metainfo import Quantity
+from nomad.config import config
+from nomad.datamodel.data import EntryData
+from nomad.datamodel.metainfo.annotations import (
+    ELNAnnotation,
+    Filter,
+    SectionProperties,
+)
+from nomad.datamodel.metainfo.basesections import Process
 
-"""
-OVERVIEW OF OLD LOGS
+# from nomad.datamodel.metainfo.basesections.v2 import Process
+from nomad.datamodel.metainfo.plot import PlotSection
+from nomad.datamodel.metainfo.workflow import Link
+from nomad.metainfo import Quantity, SchemaPackage, Section
 
-#Problem current version:
-- IDs are referring ot SQL table entries
+configuration = config.get_plugin_entry_point(
+    'nomad_age.schema_packages:Z400_schema_entry_point'
+)
 
-OLD Layer logs
-    * header
-        - Sample name
-        - date
-        - UserID
-        - AnlagenID
-        - SubstratID
-        - VorbehandlungID
-        - Chargen Bemerkung
-        - Base pressure
-        - Sample Anzahl
-        - Aufbewahrungsort
-        - Status
-        - SchichtID
-        - SputerratenID
-        - Schichtdicke
-        - Magnetfeld
-        - Schichten Bemerkung
-        - Potential
-        - Gasfluss
-        - Rate
-        - Material
-        - ReaktivgasID
-        - Reaktivgasfluss
-
-    * table
-        - Timestamp
-        - Matchbox-Tmperatur [°C]
-        - Druck Pirani [mbar]
-        - Druck Penning [mbar]
-        - DC-Potential [-V] # I don't know why -
-        - Setpoint Spannung [-V]
-        - Leistung Forwarded [W]
-        - Leistung Reflected [W]
-        - Phase [mV]
-        - Magnitude [mV]
-        - Tune [%]
-        - Load [%]
-        - Kühlwasserfluss Pumpen [l/min]
-        - Kühlwasserfluss Targets [l/min]
-
-        #Timer gestartet
+m_package = SchemaPackage(name='Z400_schema')
 
 
-
-
-
-OLD Rate logs
-    * header
-        - Sample name
-        - date
-        - UserID
-        - AnlagenID
-        - SubstratID
-        - VorbehandlungID
-        - Chargen Bemerkung
-        - Base pressure
-        - TargetID
-        - GasID
-        - Gasfluss
-        - Potential
-        - ReaktivgasID
-        - Reaktivgasfluss
-        - Kühlfalle
-        - Magnetfeld
-
-    * table
-        - Timestamp
-        - Matchbox-Tmperatur [°C]
-        - Druck Pirani [mbar]
-        - Druck Penning [°C]
-        - DC-Potential [-V] # I don't know why -
-        - Setpoint Spannung [-V]
-        - Leistung Forwarded [W]
-        - Leistung Reflected [W]
-        - Phase [mV]
-        - Magnitude [mV]
-        - Tune [%]
-        - Load [%]
-        - Kühlwasserfluss Pumpen [l/min]
-        - Kühlwasserfluss Targets [l/min]
-
-        #Timer gestartet
-
-
-OLD Machine logs
-    # Userlog.txt
-        - Date
-        - Timestamp
-        - Username/Logout
-
-    # Pressurelog.txt
-        - Date
-        - Timestamp
-        - pressure chamber [mbar]
-        - pirani loadlock [mbar]
-        - penning loadlock [mbar]
-
-    # Ratenarray.txt
-        - rate_id
-        - rate [nm/min]
-        - rate_uncertainty [nm/min]
-        - sputter power [W]
-        - gas flow [sscm]
-        - date
-        - setpoint voltage [V]
-        - Material
-        - material_id
-
-
-
-CONFIG(labview reads and writes here)
-    - Alarm-Log.txt
-    - Targets.txt
-    - Sputterprotokollnr.dat
-    - Schichtnr.dat
-    - neu
-    - eingetragen
-    - fehlerhaft
-    - Arrays
-    - Userlog.txt
-    - Pressurelog.txt
-
-    ARRAYS (labview reads this) These properties are currently as IDs in the log files
-    - Userarray
-    - Targetarray
-    - VorbehandlungArray
-    - SubstratArray
-    - Chargenarray
-    - Layerarray
-    - Ratearray
-
-##########################################################################################
-Quantities to be defined:
-- Metadata (saved upon (de)activation of standby)
-    - Datetime login
-    - Softwareversion
-    - User
-    - Targets
-    - Magnet
-    - Datetime logout
-
--
-- Process data layer
-    - header (set values)
-        - UUID
-        - Comment
-        - number of substrates # should create duplicates depending on number, and make
-          corresponding entries in the DB
-        - substrate
-        - substrate preperation
-        - Charge name
-        - layer number
-        - setpoint Ar [sccm]
-        - Setpoint Spannung [-V]
-        - layer thickness [nm]
-        - Target material
-        - rate [nm/min]
-        - rate uncertainty [nm/min]
-
-
-    - table (values which change during process)
-        - Timestamp
-        - presputter start
-        - presputter end
-        - sputter start #if this is missing, something went wrong
-        - sputter end #if this is missing, something went wrong
-        - Matchbox-Temperatur [°C]
-        - Pressure loadlock pirani [mbar]
-        - Pressure loadlock penning [mbar]
-        - Pressure chamber pirani [mbar]
-        - Pressure chamber penning [mbar]
-        - DC-Potential [-V]
-        - Leistung Forwarded [W]
-        - Leistung Reflected [W]
-        - Phase [mV]
-        - Magnitude [mV]
-        - Tune [%]
-        - Load [%]
-        - Voltage Poti [V]
-        - output Ar [sccm]
-        - active target
-
-
-- Ratenarray.txt
-    - rate_id
-    - rate [nm/min]
-    - rate_uncertainty [nm/min]
-    - sputter power [W]
-    - gas flow [sscm]
-    - date
-    - setpoint voltage [V]
-    - Material
-    - material_id
-
-- Standby data (pressure log)
-    - Pressure loadlock pirani [mbar]
-    - Pressure loadlock penning [mbar]
-    - Pressure chamber pirani [mbar]
-    - Pressure chamber penning [mbar]
-
-global sample metadata
-    - location of sample
-    - status of sample
-"""
-
-
-class Z400Schema:
-    # - Metadata (saved upon (de)activation of standby)
-    user = Quantity(
-        type=str,
-        description=(
-            'User name. Name and surname of the person who deactivated the standby.'
+class AGE_Z400(PlotSection, Process, EntryData):
+    m_def = Section(
+        label='Z400',
+        description='A Z400 sputter process',
+        a_eln=ELNAnnotation(
+            properties=SectionProperties(
+                visible=Filter(exclude=['lab_id']),
+                editable=dict(exclude=['data_file']),
+            )
         ),
     )
 
-    datetime_login = Quantity(
+    charge_name = Quantity(
         type=str,
-        description=('Datetime when the standby was deactivated.'),
+        description='name of the charge.',
     )
 
-    software_version = Quantity(
+    date = Quantity(
         type=str,
-        description=('Software version of the Z400 software.'),
+        description='date of the sputter process.',
     )
 
-    targets = Quantity(
+    user = Quantity(
         type=str,
-        description=('Targets currently present in the machine.'),
-        shape=['*'],  # should be exactly 4
+        description='user performing the sputter process.'
     )
 
-    magnet = Quantity(
-        type=bool,
-        description=('Whether the magnet is installed or not.'),
-    )
-
-    datetime_logout = Quantity(
+    machine = Quantity(
         type=str,
-        description=('Datetime when the standby was activated.'),
-    )
-
-    # global sample metadata
-    sample_location = Quantity(
-        type=str,
-        description=('Location of the sample.'),
-    )
-
-    sample_state = Quantity(
-        type=str,
-        description=('State of the sample.'),
-    )
-
-    # process_data header
-    uuid = Quantity(
-        type=str,
-        description=('UUID of the sputter process, for the respective layer.'),
-    )
-
-    comment = Quantity(
-        type=str,
-        description=('Comment for the sputter process.'),
-    )
-
-    number_of_substrates = Quantity(
-        type=int,
-        description=('Number of substrates on the sample holder.'),
+        description='machine used for the sputter process.'
     )
 
     substrate = Quantity(
-        type=str,
-        description=('Name of the substrate.'),
-    )
-
-    substrate_preperation = Quantity(
-        type=str,
-        description=('Name of the substrate preperation (cleaning).'),
-    )
-
-    Charge_name = Quantity(
-        type=str,
-        description=('Name of the charge.'),
-    )
-
-    layer_number = Quantity(
         type=int,
-        description=('Number of the current layer.'),
-    )
-    setpoint_Ar = Quantity(
-        type=float,
-        description=('Setpoint for the Ar flow.'),
-        unit='sccm',
+        description='substrate used in the sputter process.'
     )
 
-    setpoint_voltage = Quantity(
+    pretreatment = Quantity(
+        type=str,
+        description='pretreatment applied to the substrate.'
+    )
+
+    charge_comment = Quantity(
+        type=str,
+        description='comments regarding the charge created in the sputter process.'
+    )
+
+    base_pressure = Quantity(
         type=float,
-        description=('Setpoint voltage for the sputter process.'),
-        unit='V',
+        description='base pressure in the chamber before the sputter process.'
+    )
+
+    sample_quantity = Quantity(
+        type=int,
+        description='number of samples processed in this sputter run.'
+    )
+
+
+    storage_location = Quantity(
+        type=str,
+        description='location where the samples are stored after the sputter process.'
+    )
+
+    sample_status = Quantity(
+        type=str,
+        description='status of the sample after the sputter process.',
+    )
+
+    layer_id = Quantity(
+        type=int,
+        label='Layer',
+        description='identifier for the layer in the sputter process.',
+    )
+
+    sputter_rate = Quantity(
+        type=float,
+        description='sputter rate used for the process.'
     )
 
     layer_thickness = Quantity(
         type=float,
-        description=('Layer thickness for the sputter process.'),
-        unit='nm',
+        description='thickness of the layer deposited during the sputter process.'
+    )
+
+    magnet = Quantity(
+        type = str,
+        description="Sputtered with or without permanent magnet"
+    )
+
+    layer_comment = Quantity(
+        type=str,
+        description='comments regarding the layer created in the sputter process.'
+    )
+
+    SET_DC_potential = Quantity(
+        type=float,
+        description='DC potential which should be applied during the sputter process.',
+        unit='V',
+    )
+
+    SET_gas_flow = Quantity(
+        type=float,
+        description='gas flow rate which the sputter process should have.',
+        unit='sccm',
+    )
+
+
+    sputter_rate_uncertainty = Quantity(
+        type=float,
+        description='uncertainty of the sputter rate used for the sputter process.',
+        unit='nm/min',
     )
 
     target_material = Quantity(
         type=str,
-        description=('Material of the target.'),
-    )
-    rate = Quantity(
-        type=float,
-        description=('Rate for the sputter process.'),
-        unit='nm/min',
-    )
-    uncertainty_rate = Quantity(
-        type=float,
-        description=('Uncertainty of the rate for the sputter process.'),
-        unit='nm/min',
+        description='material of the target used in the sputter process of the layer.'
     )
 
-    uncertainty_thickness = Quantity(
-        type=float,
-        description=('Uncertainty of the layer thickness for the sputter process.'),
-        unit='nm',
-    )
-
-    # process_data table
-
-    date_time_process = Quantity(
+    sputter_power = Quantity(
         type=str,
-        description=('Datetime of the process.'),
+        description='sputter power used for the layer.',
+        unit='W',
     )
 
-    matchbox_temperature = Quantity(
+    gas = Quantity(
+        type=str,
+        description='gas used in the sputter process.',
+    )
+
+
+
+    matchbox_temperature_process = Quantity(
         type=float,
-        description=('Temperature of the matchbox.'),
+        shape=['*'],
         unit='°C',
+        description='Temperature of the matchbox during the sputter process.',
     )
 
-    pressure_loadlock_pirani = Quantity(
+    pressure_pirani_process = Quantity(
         type=float,
-        description=('Pressure in the loadlock, measured by the pirani sensor.'),
+        shape=['*'],
         unit='mbar',
+        description='Pirani pressure during the sputter process.',
     )
 
-    pressure_loadlock_penning = Quantity(
+    pressure_penning_process = Quantity(
         type=float,
-        description=('Pressure in the loadlock, measured by the penning sensor.'),
+        shape=['*'],
         unit='mbar',
+        description='Penning pressure during the sputter process.',
     )
 
-    pressure_chamber = Quantity(
+    DC_Potential_process = Quantity(
         type=float,
-        description=(
-            'Pressure in the chamber, measured by the either pirani or penning sensor.'
-        ),
-        unit='mbar',
-    )
-
-    DC_potential = Quantity(
-        type=float,
-        description=('DC potential of the sputter process.'),
+        shape=['*'],
         unit='V',
+        description='DC potential applied during the sputter process.',
     )
 
-    tune = Quantity(
+    power_forwarded_process = Quantity(
         type=float,
-        description=('Tune of the sputter process.'),
-        unit='%',
-    )
-
-    load = Quantity(
-        type=float,
-        description=('Load of the sputter process.'),
-        unit='%',
-    )
-
-    phase = Quantity(
-        type=float,
-        description=('Phase of the sputter process.'),
-        unit='mV',
-    )
-
-    magnitude = Quantity(
-        type=float,
-        description=('Magnitude of the sputter process.'),
-        unit='mV',
-    )
-
-    sputter_power_forwarded = Quantity(
-        type=float,
-        description=('Forwarded sputter power of the sputter process.'),
+        shape=['*'],
         unit='W',
+        description='Forwarded power during the sputter process.',
     )
 
-    sputter_power_reflected = Quantity(
+    power_reflected_process = Quantity(
         type=float,
-        description=('Reflected sputter power of the sputter process.'),
+        shape=['*'],
         unit='W',
+        description='Reflected power during the sputter process.',
     )
 
-    voltage_poti = Quantity(
+    phase_process = Quantity(
         type=float,
-        description=('Voltage of the poti.'),
+        shape=['*'],
+        unit='mV',
+        description='Phase of the ac signal.',
+    )
+
+    magnitude_process = Quantity(
+        type=float,
+        shape=['*'],
+        unit='mV',
+        description='Magnitude of the ac signal.',
+    )
+
+    tune_process = Quantity(
+        type=float,
+        shape=['*'],
+        unit='mV',
+        description='Tuning of the capacitor.',
+    )
+
+    load_process = Quantity(
+        type=float,
+        shape=['*'],
+        unit='mV',
+        description='Load of the capacitor.',
+    )
+
+    matchbox_temperature_presputter = Quantity(
+        type=float,
+        shape=['*'],
+        unit='°C',
+        description='Temperature of the matchbox during the sputter process.',
+    )
+
+    pressure_pirani_presputter = Quantity(
+        type=float,
+        shape=['*'],
+        unit='mbar',
+        description='Pirani pressure during the sputter process.',
+    )
+
+    pressure_penning_presputter = Quantity(
+        type=float,
+        shape=['*'],
+        unit='mbar',
+        description='Penning pressure during the sputter process.',
+    )
+
+    DC_Potential_presputter = Quantity(
+        type=float,
+        shape=['*'],
         unit='V',
+        description='DC potential applied during the sputter process.',
     )
 
-    output_Ar = Quantity(
+    power_forwarded_presputter = Quantity(
         type=float,
-        description=('Output of the Ar flow.'),
-        unit='sccm',
+        shape=['*'],
+        unit='W',
+        description='Forwarded power during the sputter process.',
     )
 
-    # if any of these below are missing, something went wrong
-    # - presputter start
-    # - presputter end
-    # - sputter start
-    # - sputter end
+    power_reflected_presputter = Quantity(
+        type=float,
+        shape=['*'],
+        unit='W',
+        description='Reflected power during the sputter process.',
+    )
 
-    # unsure about these:
-    # - active target?
+    phase_presputter = Quantity(
+        type=float,
+        shape=['*'],
+        unit='mV',
+        description='Phase of the ac signal.',
+    )
+
+    magnitude_presputter = Quantity(
+        type=float,
+        shape=['*'],
+        unit='mV',
+        description='Magnitude of the ac signal.',
+    )
+
+    tune_presputter = Quantity(
+        type=float,
+        shape=['*'],
+        unit='mV',
+        description='Tuning of the capacitor.',
+    )
+
+    load_presputter = Quantity(
+        type=float,
+        shape=['*'],
+        unit='mV',
+        description='Load of the capacitor.',
+    )
+
+
+
+    datetime_presputter = Quantity(
+        type=str,
+        shape=['*'],
+        description='Date and time of the presputter process.',
+    )
+
+    duration_presputter = Quantity(
+        type=float,
+        description='Duration of the presputter process in minutes.',
+        unit='min',
+    )
+
+    datetime_process = Quantity(
+        type=str,
+        shape=['*'],
+        description='Date and time of the sputter process.',
+    )
+
+    duration_process = Quantity(
+        type=float,
+        description='Duration of the process in minutes.',
+        unit='min',
+    )
+
+    timer_ended_found = Quantity(
+        type=bool,
+        description='Indicates if the timer ended successfully.'
+    )
+
+    timer_started_value = Quantity(
+        type=float,
+        description='Set timer value for the process in minutes.',
+        unit='min',
+    )
+
+    duration_process_matches_timer = Quantity(
+        type=bool,
+        description='Indicates if the duration of the process matches the timer value.'
+    )
+
+    def normalize(self, archive, logger):
+        super().normalize(archive, logger)
+        self.method = 'Z400'
+        archive.workflow2.inputs = [
+            Link(name=sample.name, section=sample.reference) for sample in self.samples
+        ]
+
+
+m_package.__init_metainfo__()
+
+# LAYER
+#     Sample name
+# - date
+# - UserID
+# - AnlagenID
+# - SubstratID
+# - VorbehandlungID
+# - Chargen Bemerkung
+# - Base pressure
+# - Sample Anzahl
+# - Aufbewahrungsort
+# - Status
+# - SchichtID
+# - SputerratenID
+# - Schichtdicke
+# - Magnetfeld
+# - Schichten Bemerkung
+# - Potential
+# - Gasfluss
+# - Rate
+# - Material
+# - ReaktivgasID
+# - Reaktivgasfluss
+
+#RATE
+# - Sample name
+# - date
+# - UserID
+# - AnlagenID
+# - SubstratID
+# - VorbehandlungID
+# - Chargen Bemerkung
+# - Base pressure
+# - TargetID
+# - GasID
+# - Gasfluss
+# - Potential
+# - ReaktivgasID
+# - Reaktivgasfluss
+# - Kühlfalle
+# - Magnetfeld

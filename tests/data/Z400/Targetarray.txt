@@ -1,0 +1,37 @@
+42	CoNiGa	0
+24	Cu	0
+25	CoFeB	0
+26	PtMn	0
+27	FeF2	0
+28	Ni	0
+29	Au	0
+30	Ti	0
+31	Pt	0
+32	FeTb	0
+33	manuell aufgebrachte Part	0
+36	Mn2Au	0
+37	Fe	0
+38	Al	0
+39	Co	0
+40	Tb	0
+23	CoFe	0
+22	IrMn	0
+21	FeMn	0
+20	Ta	0
+19	NiFe	0
+18	Ru	0
+14	Fe	2
+15	Mn	3
+8	Ta	5
+3	CoFe	6
+10	Al	7
+11	Cr	8
+7	Si	10
+4	Cu	11
+6	NiFe	18
+9	Ti	26
+1	Au	27
+2	Co	28
+5	IrMn	29
+34	manuell aufgebrachte Part	50
+35	Substrat rein	51

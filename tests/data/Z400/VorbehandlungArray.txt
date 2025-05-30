@@ -1,0 +1,18 @@
+1	Aceton, Isoprop, Wasser each 5 min Supersonic
+2	none
+3	Aceton, Isoprop, Wasser mit fusselfreiem Tuch
+4	Ethanol + Isopropanol
+5	Aceton drag and drop, Isopropanol, Wasser, N2
+6	Aceton 15 min US + Methanol 15 min US + Isoprop spuelen +ddH2O spuelen + N2 + 100W 10 min Plasma
+7	Aceton, Isoprop, Wasser, N2
+8	15min-Acetone-US, 15min-Methanol-US, Isoprop, ddH2O, N2
+9	Unknown
+10	Aceton, Isoprop, Wasser mit fusselfreiem Tuch + Heat Gun
+13	Spueli + 5min US Aceton, Isoprop, dest.H2O each, N2
+14	Spueli + Aceton mit fusselfreiem Tuch + Aceton, Isoprop, ddH2O, N2
+15	Aceton, Isoprop, H2O + Druck
+16	Aceton, Isoprop, H2O + US + Druck 
+17	Seife, Aceton, Isoprop, H2O + Druck
+18	Isopropanol mit fusselfreiem Tuch + Druckluft
+19	Aceton, Isopropanol, mit N2 trocknen
+20	N2
