@@ -10,6 +10,8 @@ from nomad.datamodel.metainfo.basesections import (
 )
 from nomad.metainfo import MEnum, Quantity, SchemaPackage, Section
 
+from nomad_age.utils.utils import get_referencing_entries
+
 configuration = config.get_plugin_entry_point(
     'nomad_age.schema_packages:age_schema_entry_point'
 )
@@ -49,6 +51,16 @@ class AGE_Sample(CompositeSystem, EntryData):
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
+        referencing = get_referencing_entries(self)
+        if not referencing:
+            return
+        used_methods = [entry['data']['method'] for entry in referencing]
+        if 'Helium Ion Bombardment' in used_methods:
+            self.state = 'after IB'
+        elif 'Field Cooling' in used_methods:
+            self.state = 'after FC'
+        else:
+            pass  # TODO: Either this or maybe set to "as made"?
 
 
 class AGE_Sample_Reference(EntityReference):

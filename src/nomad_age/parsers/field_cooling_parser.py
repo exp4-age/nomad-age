@@ -231,7 +231,7 @@ class FieldCoolingParser(MatchingParser):
                     )
                 )
             elif len(existing_sample.data) == 0:  # does not exist
-                SampleArchive = AGE_Sample(name=id, lab_id=id, state='after FC')
+                SampleArchive = AGE_Sample(name=id, lab_id=id)
                 create_archive(
                     SampleArchive,
                     archive,
