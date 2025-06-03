@@ -1,5 +1,6 @@
 import math
 
+from nomad.datamodel.data import ArchiveSection
 from nomad.utils import hash
 
 
@@ -77,3 +78,22 @@ def find_existing_AGE_sample(lab_id: str):
     query = {'results.eln.lab_ids': lab_id}
     search_result = search(query=query, owner='visible')
     return search_result
+
+
+def get_referencing_entries(archive: ArchiveSection) -> list:
+    """
+    Find all entries in the archive that reference the given archive.
+    """
+    from nomad.search import search
+
+    query = {
+        'entry_references.target_entry_id:all': [archive.m_parent.entry_id],
+    }
+    results = search(
+        query=query,
+        owner='visible',
+        # user_id=archive.metadata.main_author.user_id,
+    )
+    entry_list = results.data
+
+    return entry_list
