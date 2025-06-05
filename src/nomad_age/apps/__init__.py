@@ -40,7 +40,7 @@ age_samples = AppEntryPoint(
         path='age_samples',
         category='Experiment',
         description='AGE samples database, used to find all our samples',
-        search_quantities=SearchQuantities(include=[sample_schema]),
+        search_quantities=SearchQuantities(include=[f'*#{sample_schema}']),
         filters_locked={'section_defs.definition_qualified_name': [sample_schema]},
         columns=Columns(
             selected=['lab_id', 'state', 'entry_type'],
@@ -69,7 +69,7 @@ age_samples = AppEntryPoint(
                     'title': 'Sample ID',
                     'show_input': True,
                     'layout': {
-                        'lg': {'minH': 5, 'minW': 3, 'h': 5, 'w': 6, 'x': 6, 'y': 0},
+                        'lg': {'minH': 5, 'minW': 3, 'h': 5, 'w': 4, 'x': 6, 'y': 0},
                     },
                     'query_mode': 'or',
                 },
@@ -79,7 +79,16 @@ age_samples = AppEntryPoint(
                     'title': 'Sample state',
                     'show_input': True,
                     'layout': {
-                        'lg': {'minH': 5, 'minW': 3, 'h': 5, 'w': 6, 'x': 6, 'y': 0},
+                        'lg': {'minH': 5, 'minW': 3, 'h': 5, 'w': 4, 'x': 6, 'y': 0},
+                    },
+                },
+                {
+                    'type': 'terms',
+                    'search_quantity': f'data.location#{sample_schema}',
+                    'title': 'Sample location',
+                    'show_input': True,
+                    'layout': {
+                        'lg': {'minH': 5, 'minW': 3, 'h': 5, 'w': 4, 'x': 6, 'y': 0},
                     },
                 },
             ]

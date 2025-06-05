@@ -44,9 +44,19 @@ class AGE_Sample(CompositeSystem, EntryData):
     m_def = Section(label='AGE Sample', description='AGE sample data')
 
     state = Quantity(
-        type=MEnum(['as made', 'after FC', 'after IB']),
+        type=MEnum(['as made', 'after FC', 'after IB', 'other', 'destroyed']),
         description='Sample state',
         a_eln=ELNAnnotation(component=ELNComponentEnum.EnumEditQuantity),
+    )
+
+    location = Quantity(
+        type=str,
+        description='Location of the sample',
+        label='Sample Location',
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.StringEditQuantity,
+            label='Sample Location',
+        ),
     )
 
     def normalize(self, archive, logger):
