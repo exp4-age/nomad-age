@@ -46,11 +46,13 @@ class AGE_Sample(CompositeSystem, EntryData):
     state = Quantity(
         type=MEnum(['as made', 'after FC', 'after IB', 'other', 'destroyed']),
         description='Sample state',
-        a_eln=ELNAnnotation(component=ELNComponentEnum.EnumEditQuantity, label="Sample State"),
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.EnumEditQuantity, label='Sample State'
+        ),
     )
 
     location = Quantity(
-        type=MEnum(["Sample box", "Sample cabinet", "Archive", "External", "Trash"]),
+        type=MEnum(['Sample box', 'Sample cabinet', 'Archive', 'External', 'Trash']),
         description='Location of the sample',
         label='Sample Location',
         a_eln=ELNAnnotation(
