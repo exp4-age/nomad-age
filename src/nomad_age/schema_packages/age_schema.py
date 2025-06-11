@@ -61,15 +61,6 @@ class AGE_Sample(CompositeSystem, EntryData):
         ),
     )
 
-    location = Quantity(
-        type=str,
-        description='Location of the sample',
-        label='Sample Location',
-        a_eln=ELNAnnotation(
-            component=ELNComponentEnum.StringEditQuantity,
-            label='Sample Location',
-        ),
-    )
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)

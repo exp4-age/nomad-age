@@ -59,6 +59,9 @@ age_samples = AppEntryPoint(
                 MenuItemTerms(
                     quantity=f'data.state#{sample_schema}',
                 ),
+                MenuItemTerms(
+                    quantity=f'data.location#{sample_schema}',
+                ),
             ],
         ),
         dashboard={
