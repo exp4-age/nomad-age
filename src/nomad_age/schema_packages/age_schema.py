@@ -43,15 +43,6 @@ class AGE_RawFile_Reference(EntryData):
 class AGE_Sample(CompositeSystem, EntryData):
     m_def = Section(label='AGE Sample', description='AGE sample data')
 
-    lab_id = Quantity(
-        type=str,
-        description='Laboratory sample identifier (primary sample ID).',
-        a_eln=ELNAnnotation(
-            component=ELNComponentEnum.StringEditQuantity,
-            label='Sample ID',
-        ),
-    )
-
     state = Quantity(
         type=MEnum(['as made', 'after FC', 'after IB', 'other', 'destroyed']),
         description='Sample state',
