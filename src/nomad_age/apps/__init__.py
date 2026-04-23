@@ -32,6 +32,7 @@ app_entry_point = AppEntryPoint(
 )
 
 sample_schema = 'nomad_age.schema_packages.age_schema.AGE_Sample'
+base_entity_schema = 'nomad.datamodel.metainfo.basesections.Entity'
 age_samples = AppEntryPoint(
     name='age_samples',
     description='AGE sample database.',
@@ -40,21 +41,27 @@ age_samples = AppEntryPoint(
         path='age_samples',
         category='Experiment',
         description='AGE samples database, used to find all our samples',
-        search_quantities=SearchQuantities(include=[f'*#{sample_schema}']),
+        search_quantities=SearchQuantities(
+            include=[f'*#{sample_schema}', f'*#{base_entity_schema}']
+        ),
         filters_locked={'section_defs.definition_qualified_name': [sample_schema]},
         columns=Columns(
             selected=['lab_id', 'state', 'entry_type'],
             options={
                 'entry_type': Column(quantity='entry_type', label='Type'),
-                'lab_id': Column(quantity='data.lab_id', label='Sample ID'),
-                'state': Column(quantity='data.state', label='Sample state'),
+                'lab_id': Column(
+                    quantity=f'data.lab_id#{base_entity_schema}', label='Sample ID'
+                ),
+                'state': Column(
+                    quantity=f'data.state#{sample_schema}', label='Sample state'
+                ),
             },
         ),
         menu=Menu(
             title='Sample',
             items=[
                 MenuItemTerms(
-                    quantity=f'data.lab_id#{sample_schema}',
+                    quantity=f'data.lab_id#{base_entity_schema}',
                 ),
                 MenuItemTerms(
                     quantity=f'data.state#{sample_schema}',
@@ -68,7 +75,7 @@ age_samples = AppEntryPoint(
             'widgets': [
                 {
                     'type': 'terms',
-                    'search_quantity': f'data.lab_id#{sample_schema}',
+                    'search_quantity': f'data.lab_id#{base_entity_schema}',
                     'title': 'Sample ID',
                     'show_input': True,
                     'layout': {
