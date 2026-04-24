@@ -11,94 +11,94 @@ from nomad.config.models.ui import (
 )
 
 app_entry_point = AppEntryPoint(
-    name='NewApp',
-    description='New app entry point configuration.',
+    name="NewApp",
+    description="New app entry point configuration.",
     app=App(
-        label='NewApp',
-        path='app',
-        category='simulation',
+        label="NewApp",
+        path="app",
+        category="simulation",
         columns=Columns(
-            selected=['entry_id'],
+            selected=["entry_id"],
             options={
-                'entry_id': Column(),
+                "entry_id": Column(),
             },
         ),
         filter_menus=FilterMenus(
             options={
-                'material': FilterMenu(label='Material'),
+                "material": FilterMenu(label="Material"),
             }
         ),
     ),
 )
 
-sample_schema = 'nomad_age.schema_packages.age_schema.AGE_Sample'
-base_entity_schema = 'nomad.datamodel.metainfo.basesections.Entity'
+sample_schema = "nomad_age.schema_packages.age_schema.AGE_Sample"
+base_entity_schema = "nomad.datamodel.metainfo.basesections.v1.BaseSection"
 age_samples = AppEntryPoint(
-    name='age_samples',
-    description='AGE sample database.',
+    name="age_samples",
+    description="AGE sample database.",
     app=App(
-        label='AGE Samples',
-        path='age_samples',
-        category='Experiment',
-        description='AGE samples database, used to find all our samples',
+        label="AGE Samples",
+        path="age_samples",
+        category="Experiment",
+        description="AGE samples database, used to find all our samples",
         search_quantities=SearchQuantities(
-            include=[f'*#{sample_schema}', f'*#{base_entity_schema}']
+            include=[f"*#{sample_schema}", f"*#{base_entity_schema}"]
         ),
-        filters_locked={'section_defs.definition_qualified_name': [sample_schema]},
+        filters_locked={"section_defs.definition_qualified_name": [sample_schema]},
         columns=Columns(
-            selected=['lab_id', 'state', 'entry_type'],
+            selected=["lab_id", "state", "entry_type"],
             options={
-                'entry_type': Column(quantity='entry_type', label='Type'),
-                'lab_id': Column(
-                    quantity=f'data.lab_id#{base_entity_schema}', label='Sample ID'
+                "entry_type": Column(quantity="entry_type", label="Type"),
+                "lab_id": Column(
+                    quantity=f"data.lab_id#{base_entity_schema}", label="Sample ID"
                 ),
-                'state': Column(
-                    quantity=f'data.state#{sample_schema}', label='Sample state'
+                "state": Column(
+                    quantity=f"data.state#{sample_schema}", label="Sample state"
                 ),
             },
         ),
         menu=Menu(
-            title='Sample',
+            title="Sample",
             items=[
                 MenuItemTerms(
-                    quantity=f'data.lab_id#{base_entity_schema}',
+                    quantity=f"data.lab_id#{base_entity_schema}",
                 ),
                 MenuItemTerms(
-                    quantity=f'data.state#{sample_schema}',
+                    quantity=f"data.state#{sample_schema}",
                 ),
                 MenuItemTerms(
-                    quantity=f'data.location#{sample_schema}',
+                    quantity=f"data.location#{sample_schema}",
                 ),
             ],
         ),
         dashboard={
-            'widgets': [
+            "widgets": [
                 {
-                    'type': 'terms',
-                    'search_quantity': f'data.lab_id#{base_entity_schema}',
-                    'title': 'Sample ID',
-                    'show_input': True,
-                    'layout': {
-                        'lg': {'minH': 5, 'minW': 3, 'h': 5, 'w': 4, 'x': 6, 'y': 0},
+                    "type": "terms",
+                    "search_quantity": f"data.lab_id#{base_entity_schema}",
+                    "title": "Sample ID",
+                    "show_input": True,
+                    "layout": {
+                        "lg": {"minH": 5, "minW": 3, "h": 5, "w": 4, "x": 6, "y": 0},
                     },
-                    'query_mode': 'or',
+                    "query_mode": "or",
                 },
                 {
-                    'type': 'terms',
-                    'search_quantity': f'data.state#{sample_schema}',
-                    'title': 'Sample state',
-                    'show_input': True,
-                    'layout': {
-                        'lg': {'minH': 5, 'minW': 3, 'h': 5, 'w': 4, 'x': 6, 'y': 0},
+                    "type": "terms",
+                    "search_quantity": f"data.state#{sample_schema}",
+                    "title": "Sample state",
+                    "show_input": True,
+                    "layout": {
+                        "lg": {"minH": 5, "minW": 3, "h": 5, "w": 4, "x": 6, "y": 0},
                     },
                 },
                 {
-                    'type': 'terms',
-                    'search_quantity': f'data.location#{sample_schema}',
-                    'title': 'Sample location',
-                    'show_input': True,
-                    'layout': {
-                        'lg': {'minH': 5, 'minW': 3, 'h': 5, 'w': 4, 'x': 6, 'y': 0},
+                    "type": "terms",
+                    "search_quantity": f"data.location#{sample_schema}",
+                    "title": "Sample location",
+                    "show_input": True,
+                    "layout": {
+                        "lg": {"minH": 5, "minW": 3, "h": 5, "w": 4, "x": 6, "y": 0},
                     },
                 },
             ]
