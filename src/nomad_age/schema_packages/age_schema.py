@@ -61,7 +61,6 @@ class AGE_Sample(CompositeSystem, EntryData):
         ),
     )
 
-
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
         referencing = get_referencing_entries(self)

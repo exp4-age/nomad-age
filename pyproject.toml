@@ -7,6 +7,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
+    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -16,7 +17,7 @@ name = "nomad-age"
 description = "A NOMAD plugin for the AGE."
 version = "0.1.0"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 authors = [
     { name = "Nikolai Weidt", email = "nw@uni-kassel.de" },
 ]
@@ -25,7 +26,7 @@ maintainers = [
 ]
 license = { file = "LICENSE" }
 dependencies = [
-    "nomad-lab>=1.4.0",
+    "nomad-lab>=1.3.0",
     "python-magic-bin; sys_platform == 'win32'",
     "evaluix"
 ]

@@ -17,5 +17,5 @@ def test_age_sample_has_lab_id():
     all_quantity_names = [q.name for q in AGE_Sample.m_def.all_quantities.values()]
     assert 'lab_id' in all_quantity_names, (
         "AGE_Sample must have an accessible 'lab_id' quantity (inherited from Entity) "
-        "so that data.lab_id is resolvable as a search quantity in the age_samples app."
+        'so that data.lab_id is resolvable as a search quantity in the age_samples app.'
     )
