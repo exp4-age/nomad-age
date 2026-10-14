@@ -1,7 +1,7 @@
 import traceback
 from typing import Union
 
-import evaluix.utils.EvaluationFunctions as ef
+import evaluix.utils.hysteresis_functions as ef
 import numpy as np
 import pint
 from nomad.datamodel import EntryArchive
@@ -34,7 +34,7 @@ class LMOKENormalizer(Normalizer):
             evaluated_hysteresis = self.hyseval(
                 archive.data['magnetic_field'],
                 archive.data['magnetization'],
-                'tan_hyseval',
+                'arctan_hyseval',
             )
 
             try:
@@ -60,20 +60,18 @@ class LMOKENormalizer(Normalizer):
             else:
                 params = {}
 
-            # Add the evaluated hysteresis parameters to the archive
-
-            for key in params.keys():
-                if (
-                    'd' + key in params.keys()
-                ):  # if the uncertainty is present (+ 'd'), the value should be
-                    # present as well
-                    dkey = 'd' + key
-
-                    setattr(archive.data, key, params[key])
-                    setattr(archive.data, dkey, params[dkey])
-
-                else:
-                    setattr(archive.data, key, params[key])
+            # Add the evaluated hysteresis parameters to the archive.
+            # evaluix suffixes per-loop results with the loop index ('HC_1');
+            # raw fit parameters (a, b_1, ...) have no schema quantity and are skipped.
+            quantities = archive.data.m_def.all_quantities
+            for key, value in params.items():
+                name = key.removesuffix('_1')
+                quantity = quantities.get(name)
+                if quantity is None:
+                    continue
+                if quantity.shape and np.ndim(value) == 0:
+                    value = np.full(quantity.shape, value)
+                setattr(archive.data, name, value)
 
     def normalize_magnetization(
         self,
