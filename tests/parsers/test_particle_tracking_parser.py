@@ -22,6 +22,7 @@ from nomad_age.parsers.particle_tracking_parser import (
     parse_timestamp,
     plot_external_field,
     plot_trajectories,
+    time_from_filename,
 )
 from nomad_age.schema_packages.age_schema import AGE_RawFile
 from nomad_age.schema_packages.particle_tracking_schema import AGE_ParticleTracking
@@ -171,6 +172,51 @@ def test_illumination_from_background(background, dtype, illumination):
 )
 def test_timestamps_are_lab_local_time(timestamp, utc):
     assert parse_timestamp(timestamp) == utc
+
+
+@pytest.mark.parametrize(
+    'filename, utc',
+    [
+        (
+            '20250227110207_focus_sweep.h5',
+            datetime(2025, 2, 27, 10, 2, 7, tzinfo=timezone.utc),
+        ),
+        (
+            '202604081623_x1Hz_z1Hz_5mu_4kAm_M270_trajs.h5',
+            datetime(2026, 4, 8, 14, 23, tzinfo=timezone.utc),
+        ),
+        # midnight local time is the previous day in UTC
+        (
+            '20260319_x2kAm_z4kAm_5mu_M270_720fps_trajs.h5',
+            datetime(2026, 3, 18, 23, 0, tzinfo=timezone.utc),
+        ),
+        (
+            '2023_0418_M270COOHDynabeads_20x_FieldSweep0.2Hz_100mV_25s_1_trajs.h5',
+            datetime(2023, 4, 17, 22, 0, tzinfo=timezone.utc),
+        ),
+        ('1to2_trajs.h5', None),
+        ('NewLadder1_trajs.h5', None),
+        ('2023_1399_trajs.h5', None),  # no such date
+        ('123456789_trajs.h5', None),
+        ('rec_20260319_trajs.h5', None),  # only a leading date counts
+    ],
+)
+def test_recording_time_from_filename(filename, utc):
+    assert time_from_filename(filename) == utc
+
+
+def test_camera_timestamp_wins_over_filename_date(tmp_path):
+    write_tracks(tmp_path / '2023_0418_a_trajs.h5', make_tracks(), {})
+    write_tracks(tmp_path / '2023_0418_b_trajs.h5', make_tracks(), CAMERA_ATTRS)
+
+    def recorded(stem):
+        files = find_recording_files(str(tmp_path), stem)
+        return build_particle_tracking_entry(str(tmp_path), '', stem, files).datetime
+
+    assert recorded('2023_0418_a') == datetime(2023, 4, 17, 22, tzinfo=timezone.utc)
+    assert recorded('2023_0418_b') == datetime(
+        2026, 4, 15, 12, 43, 48, tzinfo=timezone.utc
+    )
 
 
 @pytest.mark.parametrize(

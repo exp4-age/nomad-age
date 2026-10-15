@@ -42,6 +42,10 @@ FIELD_PREFIX = 'field_'
 MAX_FIELD_POINTS = 5000
 # AGE chip ids such as 2023_0418 or 2023_0325_1; '2023_0418_1hz' yields 2023_0418.
 CHIP_ID_RE = re.compile(r'(?<!\d)\d{4}_\d{4}(?:_\d(?![0-9A-Za-z]))?(?!\d)')
+# Lab-local date (and time) at the start of a file name: 20250227110207_...,
+# 202604081623_..., 20260319_... or the date of a chip id such as 2023_0418_...
+FILENAME_TIME_RE = re.compile(r'(\d{14}|\d{12}|\d{8}|\d{4}_\d{4})(?!\d)')
+FILENAME_TIME_FORMATS = {14: '%Y%m%d%H%M%S', 12: '%Y%m%d%H%M', 8: '%Y%m%d'}
 
 
 def recording_stem(filename: str) -> str:
@@ -84,6 +88,19 @@ def parse_timestamp(value) -> Optional[datetime]:
     if isinstance(value, str) and re.fullmatch(r'\d{14}', value):
         return lab_time_to_utc(datetime.strptime(value, '%Y%m%d%H%M%S'))
     return None
+
+
+def time_from_filename(filename: str) -> Optional[datetime]:
+    """UTC time of the lab-local date (and time) that a file name starts with."""
+    match = FILENAME_TIME_RE.match(os.path.basename(filename))
+    if not match:
+        return None
+    digits = match.group(1).replace('_', '')
+    try:
+        local_time = datetime.strptime(digits, FILENAME_TIME_FORMATS[len(digits)])
+    except ValueError:  # no such date, e.g. 2023_1399
+        return None
+    return lab_time_to_utc(local_time)
 
 
 def _float_or_none(value) -> Optional[float]:
@@ -253,6 +270,8 @@ def build_particle_tracking_entry(
             entry.camera_model = settings.get('DeviceModelName')
             entry.datetime = parse_timestamp(settings.get('timestamp'))
             break
+    if entry.datetime is None:
+        entry.datetime = time_from_filename(stem)
 
     figures = []
     plot_kind = 'filtered_tracks' if filtered is not None else 'tracks'
@@ -315,7 +334,7 @@ def build_focus_sweep_entry(path: str, rel_path: str) -> AGE_FocusSweep:
         max_focus_position=max_focus,
         max_slope_position=max_slope,
         last_position=_float_or_none(attrs.get('last_position')),
-        datetime=parse_timestamp(attrs.get('timestamp')),
+        datetime=parse_timestamp(attrs.get('timestamp')) or time_from_filename(path),
     )
     figure = plot_focus_sweep(z_position, tenengrad, max_focus, max_slope)
     entry.figures = [PlotlyFigure(label='Focus Sweep', figure=figure.to_plotly_json())]
