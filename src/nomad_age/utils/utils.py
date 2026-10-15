@@ -1,7 +1,12 @@
 import math
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from nomad.datamodel.data import ArchiveSection
 from nomad.utils import hash
+
+# Lab software (camera, field cooling) writes wall-clock times without a zone.
+LAB_TIMEZONE = ZoneInfo('Europe/Berlin')
 
 
 def get_reference(upload_id, entry_id):
@@ -14,6 +19,11 @@ def get_entry_id(upload_id, filename):
 
 def get_hash_ref(upload_id, filename):
     return f'{get_reference(upload_id, get_entry_id(upload_id, filename))}#data'
+
+
+def lab_time_to_utc(local_time: datetime) -> datetime:
+    """UTC time of a naive wall-clock time written by lab software in Kassel."""
+    return local_time.replace(tzinfo=LAB_TIMEZONE).astimezone(timezone.utc)
 
 
 def nan_equal(a, b):

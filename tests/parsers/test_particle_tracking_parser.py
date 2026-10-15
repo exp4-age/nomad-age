@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import h5py
 import numpy as np
@@ -18,6 +18,7 @@ from nomad_age.parsers.particle_tracking_parser import (
     build_particle_tracking_entry,
     chip_ids_from_filename,
     find_recording_files,
+    parse_timestamp,
     plot_trajectories,
 )
 from nomad_age.schema_packages.age_schema import AGE_RawFile
@@ -133,7 +134,20 @@ def test_filtered_only_recording_takes_camera_settings_from_video(tmp_path):
     assert entry.n_localizations_filtered == 6
     assert entry.camera_model == 'MC2066'
     assert entry.frame_rate.to('Hz').magnitude == 100
-    assert entry.datetime.replace(tzinfo=None) == datetime(2026, 4, 15, 14, 43, 48)
+    # 14:43:48 local summer time (UTC+2)
+    assert entry.datetime == datetime(2026, 4, 15, 12, 43, 48, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize(
+    'timestamp, utc',
+    [
+        ('20250227110207', datetime(2025, 2, 27, 10, 2, 7, tzinfo=timezone.utc)),
+        ('20260415144348', datetime(2026, 4, 15, 12, 43, 48, tzinfo=timezone.utc)),
+    ],
+    ids=['winter CET', 'summer CEST'],
+)
+def test_timestamps_are_lab_local_time(timestamp, utc):
+    assert parse_timestamp(timestamp) == utc
 
 
 @pytest.mark.parametrize(

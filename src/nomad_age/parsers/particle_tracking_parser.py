@@ -23,6 +23,7 @@ from nomad_age.utils.utils import (
     get_entry_id,
     get_hash_ref,
     get_reference,
+    lab_time_to_utc,
     update_entry,
 )
 
@@ -72,9 +73,9 @@ def read_h5_attrs(path: str) -> dict:
 
 
 def parse_timestamp(value) -> Optional[datetime]:
-    """Local save time written by the acquisition software as %Y%m%d%H%M%S."""
+    """UTC time of the local save time (%Y%m%d%H%M%S) of the acquisition software."""
     if isinstance(value, str) and re.fullmatch(r'\d{14}', value):
-        return datetime.strptime(value, '%Y%m%d%H%M%S')
+        return lab_time_to_utc(datetime.strptime(value, '%Y%m%d%H%M%S'))
     return None
 
 

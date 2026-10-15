@@ -21,6 +21,7 @@ from nomad_age.utils.utils import (
     find_existing_AGE_sample,
     get_entry_id,
     get_hash_ref,
+    lab_time_to_utc,
     update_entry,
 )
 
@@ -141,7 +142,7 @@ class FieldCoolingParser(MatchingParser):
                         entry.description = lineend
             elif 'Datum:' in line:
                 start_time = parse_date(line.split(':', 1)[1].strip())
-                entry.datetime = start_time
+                entry.datetime = lab_time_to_utc(start_time)
             elif 'T(Blocking)' in line:
                 entry.blocking_temperature = float(line.split(':')[1])
             elif 'Plateuzeit' in line:
@@ -173,7 +174,9 @@ class FieldCoolingParser(MatchingParser):
             data = np.array(data_table)
             entry.time = data[:, 0].tolist()
             if start_time:
-                entry.end_time = start_time + timedelta(seconds=data[:, 0].tolist()[-1])
+                entry.end_time = lab_time_to_utc(start_time) + timedelta(
+                    seconds=data[:, 0].tolist()[-1]
+                )
             entry.measured_temperature = data[:, 1].tolist()
             entry.target_temperature = data[:, 2].tolist()
             entry.pirani_pressure = data[:, 3].tolist()
