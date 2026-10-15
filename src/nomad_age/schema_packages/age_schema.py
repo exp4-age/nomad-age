@@ -1,14 +1,20 @@
 from nomad.config import config
 from nomad.datamodel import EntryData
-from nomad.datamodel.metainfo.annotations import ELNAnnotation, ELNComponentEnum
+from nomad.datamodel.metainfo.annotations import (
+    ELNAnnotation,
+    ELNComponentEnum,
+    Filter,
+    SectionProperties,
+)
 
 # from nomad.datamodel.metainfo.basesections.v2 import System
 from nomad.datamodel.metainfo.basesections import (
     Activity,
     CompositeSystem,
     EntityReference,
+    Instrument,
 )
-from nomad.metainfo import MEnum, Quantity, SchemaPackage, Section
+from nomad.metainfo import Datetime, MEnum, Quantity, SchemaPackage, Section
 
 from nomad_age.utils.utils import get_referencing_entries
 
@@ -87,6 +93,81 @@ class AGE_Sample_Reference(EntityReference):
             component=ELNComponentEnum.ReferenceEditQuantity,
             label='Age Sample Reference',
         ),
+    )
+
+
+class AGE_Particles(CompositeSystem, EntryData):
+    """Particles of one batch; measurements link it under samples."""
+
+    m_def = Section(
+        label='Particles',
+        description='A batch of particles, e.g. one charge of M270 beads.',
+        a_eln=ELNAnnotation(
+            properties=SectionProperties(
+                visible=Filter(exclude=['datetime']),
+                order=[
+                    'name',
+                    'lab_id',
+                    'particle_type',
+                    'batch',
+                    'batch_date',
+                    'description',
+                ],
+            )
+        ),
+    )
+
+    particle_type = Quantity(
+        type=str,
+        description='Particle type, e.g. M270.',
+        a_eln=ELNAnnotation(component=ELNComponentEnum.StringEditQuantity),
+    )
+
+    batch = Quantity(
+        type=str,
+        description='Batch (Charge) or lot number of the particles.',
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.StringEditQuantity, label='Batch (Charge)'
+        ),
+    )
+
+    batch_date = Quantity(
+        type=Datetime,
+        description='Date of the batch, e.g. delivery or preparation date.',
+        a_eln=ELNAnnotation(component=ELNComponentEnum.DateEditQuantity),
+    )
+
+
+class AGE_Objective(Instrument, EntryData):
+    """Microscope objective; measurements link it under instruments."""
+
+    m_def = Section(
+        label='Objective',
+        description='A microscope objective.',
+        a_eln=ELNAnnotation(
+            properties=SectionProperties(
+                visible=Filter(exclude=['datetime']),
+                order=[
+                    'name',
+                    'lab_id',
+                    'magnification',
+                    'numerical_aperture',
+                    'description',
+                ],
+            )
+        ),
+    )
+
+    magnification = Quantity(
+        type=float,
+        description='Nominal magnification, e.g. 20.',
+        a_eln=ELNAnnotation(component=ELNComponentEnum.NumberEditQuantity),
+    )
+
+    numerical_aperture = Quantity(
+        type=float,
+        description='Numerical aperture (NA).',
+        a_eln=ELNAnnotation(component=ELNComponentEnum.NumberEditQuantity),
     )
 
 
