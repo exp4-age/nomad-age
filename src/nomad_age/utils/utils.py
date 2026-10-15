@@ -81,8 +81,51 @@ def create_archive(entity, archive, file_name, *, overwrite: bool = False):
     return False
 
 
+def user_editable_keys(section_def) -> set:
+    """Quantities and subsections of a section that users edit in the GUI.
+
+    A quantity counts if it has an ELN component and the section's ELN
+    properties do not exclude it from editing; a subsection counts if any of its
+    quantities has an ELN component (e.g. samples, but not figures).
+    """
+
+    def has_component(quantity):
+        return getattr(quantity.m_annotations.get('eln'), 'component', None) is not None
+
+    properties = getattr(section_def.m_annotations.get('eln'), 'properties', None)
+    editable = getattr(properties, 'editable', None)
+    included = getattr(editable, 'include', None)
+    excluded = getattr(editable, 'exclude', None) or []
+    keys = {
+        name
+        for name, quantity in section_def.all_quantities.items()
+        if has_component(quantity)
+        and name not in excluded
+        and (not included or name in included)
+    }
+    keys.update(
+        name
+        for name, sub_section in section_def.all_sub_sections.items()
+        if any(map(has_component, sub_section.sub_section.all_quantities.values()))
+    )
+    return keys
+
+
+def merge_stored_values(fresh: dict, stored, editable: set) -> dict:
+    """The fresh parse plus the stored values that users may have changed.
+
+    Stored values win for editable keys and for keys the parser does not set;
+    parsed values such as numbers, figures and file links come from `fresh`.
+    """
+    merged = dict(fresh)
+    for key, value in stored.items():
+        if key in editable or key not in merged:
+            merged[key] = value
+    return merged
+
+
 def update_entry(entry, eid, archive, logger):
-    """Update the entries with the new archive."""
+    """`entry` merged with the stored entry `eid`, see merge_stored_values."""
     from nomad import files
     from nomad.search import search
 
@@ -102,7 +145,9 @@ def update_entry(entry, eid, archive, logger):
             entry_id = res['entry_id']
             entry_data = ar[entry_id]['data']
             entry_data.pop('m_def', None)
-            new_entry_dict.update(entry_data)
+            new_entry_dict = merge_stored_values(
+                new_entry_dict, entry_data, user_editable_keys(type(entry).m_def)
+            )
     except Exception as e:
         logger.error('Error in processing data: ', e)
     return type(entry).m_from_dict(new_entry_dict)

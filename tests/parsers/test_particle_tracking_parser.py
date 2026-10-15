@@ -25,7 +25,11 @@ from nomad_age.parsers.particle_tracking_parser import (
 )
 from nomad_age.schema_packages.age_schema import AGE_RawFile
 from nomad_age.schema_packages.particle_tracking_schema import AGE_ParticleTracking
-from nomad_age.utils.utils import get_hash_ref
+from nomad_age.utils.utils import (
+    get_hash_ref,
+    merge_stored_values,
+    user_editable_keys,
+)
 
 # Root attributes as written by the acquisition software (harvesters_pg).
 CAMERA_ATTRS = {
@@ -217,6 +221,30 @@ def test_external_field_is_plotted_once_per_frame():
     no_time = plot_external_field(tracks.drop(columns='timestamp_fixed'), 100.0)
     assert list(no_time.data[0].x) == [0.0, 0.01, 0.02]
     assert plot_external_field(make_tracks(), frame_rate=100.0) is None
+
+
+def test_reprocessing_keeps_user_edits_and_refreshes_parsed_values():
+    editable = user_editable_keys(AGE_ParticleTracking.m_def)
+    assert {'illumination', 'pixel_size', 'datetime', 'samples'} <= editable
+    assert not editable & {'figures', 'n_particles', 'tracks_file', 'frame_rate'}
+
+    fresh = {
+        'figures': ['tracks', 'field'],
+        'n_particles': 3,
+        'illumination': 'darkfield',
+    }
+    stored = {
+        'figures': ['tracks'],
+        'n_particles': 2,
+        'illumination': 'brightfield',
+        'method': 'Particle Tracking',
+    }
+    assert merge_stored_values(fresh, stored, editable) == {
+        'figures': ['tracks', 'field'],  # parser output is refreshed
+        'n_particles': 3,
+        'illumination': 'brightfield',  # the user's choice stays
+        'method': 'Particle Tracking',  # not set by the parser: kept
+    }
 
 
 def test_parse_writes_entry_yaml_that_round_trips(tmp_path):
