@@ -13,7 +13,7 @@ m_package = SchemaPackage(name='particle_tracking_schema')
 
 
 class AGE_ParticleMicroscopy(ArchiveSection):
-    """Microscope settings that the recording files do not contain.
+    """Microscope settings that the camera attributes do not contain.
 
     Particles and the objective are entries of their own (AGE_Particles,
     AGE_Objective) that measurements link under samples and instruments.
@@ -21,7 +21,10 @@ class AGE_ParticleMicroscopy(ArchiveSection):
 
     illumination = Quantity(
         type=MEnum(['brightfield', 'darkfield']),
-        description='Illumination mode of the microscope.',
+        description=(
+            'Illumination mode of the microscope. Guessed from the background '
+            'brightness of the first video frame or sweep image; edit if wrong.'
+        ),
         a_eln=ELNAnnotation(component=ELNComponentEnum.EnumEditQuantity),
     )
 

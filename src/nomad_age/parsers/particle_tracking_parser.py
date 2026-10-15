@@ -33,6 +33,10 @@ PYTABLES_ATTRS = {'CLASS', 'PYTABLES_FORMAT_VERSION', 'TITLE', 'VERSION'}
 REQUIRED_TRACK_COLUMNS = ('x', 'y', 'frame', 'particle')
 MAX_PLOT_TRACKS = 100
 MAX_POINTS_PER_TRACK = 200
+# Median pixel value relative to full scale. Rig recordings: darkfield videos
+# <= 0.06, brightfield videos >= 0.44, focus sweeps 0.09-0.13.
+DARKFIELD_MAX_BACKGROUND = 0.2
+BRIGHTFIELD_MIN_BACKGROUND = 0.3
 # AGE chip ids such as 2023_0418 or 2023_0325_1; '2023_0418_1hz' yields 2023_0418.
 CHIP_ID_RE = re.compile(r'(?<!\d)\d{4}_\d{4}(?:_\d(?![0-9A-Za-z]))?(?!\d)')
 
@@ -100,6 +104,21 @@ def _is_video(path: str) -> bool:
             return 'frames' in f
     except OSError:
         return False
+
+
+def guess_illumination(image: np.ndarray) -> Optional[str]:
+    """Darkfield images have a dark background, brightfield images a bright one.
+
+    None if the background lies in between or the image is not integer-valued.
+    """
+    if not np.issubdtype(image.dtype, np.integer):
+        return None
+    background = np.median(image) / np.iinfo(image.dtype).max
+    if background < DARKFIELD_MAX_BACKGROUND:
+        return 'darkfield'
+    if background > BRIGHTFIELD_MIN_BACKGROUND:
+        return 'brightfield'
+    return None
 
 
 def find_recording_files(directory: str, stem: str) -> dict:
@@ -174,6 +193,8 @@ def build_particle_tracking_entry(
         entry.n_localizations_filtered = len(filtered)
     if files['video']:
         entry.video_file = os.path.join(rel_directory, files['video'])
+        with h5py.File(os.path.join(directory, files['video']), 'r') as f:
+            entry.illumination = guess_illumination(f['frames'][0])
 
     frame_source = tracks if tracks is not None else filtered
     if frame_source is not None and len(frame_source):
@@ -224,7 +245,8 @@ def plot_focus_sweep(
 def build_focus_sweep_entry(path: str, rel_path: str) -> AGE_FocusSweep:
     """Entry of a focus sweep file; `rel_path` is its upload-relative path."""
     with h5py.File(path, 'r') as f:
-        n_images = f['imgs'].shape[0]  # the images themselves are not loaded
+        n_images = f['imgs'].shape[0]  # only the first image is loaded
+        illumination = guess_illumination(f['imgs'][0])
         z_position = f['poss'][()].tolist()
         tenengrad = f['tgs'][()].tolist()
     attrs = read_h5_attrs(path)
@@ -234,6 +256,7 @@ def build_focus_sweep_entry(path: str, rel_path: str) -> AGE_FocusSweep:
         name=os.path.splitext(os.path.basename(path))[0],
         data_file=rel_path,
         n_images=n_images,
+        illumination=illumination,
         z_position=z_position,
         tenengrad=tenengrad,
         max_focus_position=max_focus,

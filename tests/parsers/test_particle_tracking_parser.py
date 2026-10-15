@@ -18,6 +18,7 @@ from nomad_age.parsers.particle_tracking_parser import (
     build_particle_tracking_entry,
     chip_ids_from_filename,
     find_recording_files,
+    guess_illumination,
     parse_timestamp,
     plot_trajectories,
 )
@@ -136,6 +137,23 @@ def test_filtered_only_recording_takes_camera_settings_from_video(tmp_path):
     assert entry.frame_rate.to('Hz').magnitude == 100
     # 14:43:48 local summer time (UTC+2)
     assert entry.datetime == datetime(2026, 4, 15, 12, 43, 48, tzinfo=timezone.utc)
+    assert entry.illumination == 'darkfield'  # the video frames are black
+
+
+@pytest.mark.parametrize(
+    'background, dtype, illumination',
+    [
+        (4, np.uint8, 'darkfield'),  # like the rig's darkfield videos
+        (131, np.uint8, 'brightfield'),  # like the rig's brightfield videos
+        (64, np.uint8, None),  # in between: left to the scientists
+        (60000, np.uint16, 'brightfield'),
+        (0.5, np.float32, None),  # no known full scale
+    ],
+)
+def test_illumination_from_background(background, dtype, illumination):
+    image = np.full((40, 60), background, dtype=dtype)
+    image[10:14, 10:14] = 0 if background > 100 else 200  # one particle
+    assert guess_illumination(image) == illumination
 
 
 @pytest.mark.parametrize(
