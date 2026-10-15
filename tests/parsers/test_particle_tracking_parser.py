@@ -20,6 +20,7 @@ from nomad_age.parsers.particle_tracking_parser import (
     find_recording_files,
     guess_illumination,
     parse_timestamp,
+    plot_external_field,
     plot_trajectories,
 )
 from nomad_age.schema_packages.age_schema import AGE_RawFile
@@ -200,6 +201,22 @@ def test_trajectory_plot_keeps_longest_tracks_and_caps_points():
         f'particle {i}' for i in range(50, 150)
     }
     assert all(len(trace.x) <= 200 for trace in fig.data)
+
+
+def test_external_field_is_plotted_once_per_frame():
+    tracks = make_tracks()  # frames 0-2; frame 0 has three particles
+    tracks['field_voltage'] = 0.05 * tracks['frame']
+    tracks['timestamp_fixed'] = 0.01 * tracks['frame']
+
+    (trace,) = plot_external_field(tracks, frame_rate=None).data
+    assert trace.name == 'field_voltage'
+    assert list(trace.x) == [0.0, 0.01, 0.02]
+    assert list(trace.y) == [0.0, 0.05, 0.1]
+
+    # without timestamps the time comes from the frame rate
+    no_time = plot_external_field(tracks.drop(columns='timestamp_fixed'), 100.0)
+    assert list(no_time.data[0].x) == [0.0, 0.01, 0.02]
+    assert plot_external_field(make_tracks(), frame_rate=100.0) is None
 
 
 def test_parse_writes_entry_yaml_that_round_trips(tmp_path):

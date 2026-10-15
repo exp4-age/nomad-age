@@ -37,6 +37,9 @@ MAX_POINTS_PER_TRACK = 200
 # <= 0.06, brightfield videos >= 0.44, focus sweeps 0.09-0.13.
 DARKFIELD_MAX_BACKGROUND = 0.2
 BRIGHTFIELD_MIN_BACKGROUND = 0.3
+# Optional per-frame columns of the tracks with the external field, e.g. field_voltage.
+FIELD_PREFIX = 'field_'
+MAX_FIELD_POINTS = 5000
 # AGE chip ids such as 2023_0418 or 2023_0325_1; '2023_0418_1hz' yields 2023_0418.
 CHIP_ID_RE = re.compile(r'(?<!\d)\d{4}_\d{4}(?:_\d(?![0-9A-Za-z]))?(?!\d)')
 
@@ -169,6 +172,42 @@ def plot_trajectories(tracks: pd.DataFrame, source_name: str) -> go.Figure:
     return fig
 
 
+def plot_external_field(
+    tracks: pd.DataFrame, frame_rate: Optional[float]
+) -> Optional[go.Figure]:
+    """The field_* columns over time, one point per frame; None without them.
+
+    Time is timestamp_fixed (s) if present, else frame / frame_rate, else the frame.
+    """
+    columns = [c for c in tracks.columns if c.startswith(FIELD_PREFIX)]
+    if not columns:
+        return None
+    frames = tracks.drop_duplicates('frame').sort_values('frame')
+    if 'timestamp_fixed' in frames.columns:
+        time, time_title = frames['timestamp_fixed'], 'time (s)'
+    elif frame_rate:
+        time, time_title = frames['frame'] / frame_rate, 'time (s)'
+    else:
+        time, time_title = frames['frame'], 'frame'
+    step = -(-len(frames) // MAX_FIELD_POINTS)
+    fig = go.Figure()
+    for column in columns:
+        fig.add_trace(
+            go.Scatter(
+                x=time.iloc[::step].tolist(),
+                y=frames[column].iloc[::step].tolist(),
+                mode='lines',
+                name=column,
+            )
+        )
+    fig.update_layout(
+        title='External field',
+        xaxis=dict(title=time_title),
+        yaxis=dict(title=', '.join(columns)),
+    )
+    return fig
+
+
 def build_particle_tracking_entry(
     directory: str, rel_directory: str, stem: str, files: dict
 ) -> AGE_ParticleTracking:
@@ -201,25 +240,39 @@ def build_particle_tracking_entry(
         entry.n_frames = int(frame_source['frame'].max()) + 1
 
     # Older tracks and all filtered tracks lack the camera attributes.
+    frame_rate = None
     for kind in ('tracks', 'filtered_tracks', 'video'):
         if not files[kind]:
             continue
         settings = read_h5_attrs(os.path.join(directory, files[kind]))
         if settings:
+            frame_rate = _float_or_none(settings.get('fps'))
             entry.camera_settings = settings
-            entry.frame_rate = _float_or_none(settings.get('fps'))
+            entry.frame_rate = frame_rate
             entry.exposure_time = _float_or_none(settings.get('ExposureTime'))
             entry.camera_model = settings.get('DeviceModelName')
             entry.datetime = parse_timestamp(settings.get('timestamp'))
             break
 
+    figures = []
     plot_kind = 'filtered_tracks' if filtered is not None else 'tracks'
     plot_tracks = filtered if filtered is not None else tracks
     if plot_tracks is not None and len(plot_tracks):
-        figure = plot_trajectories(plot_tracks, files[plot_kind])
-        entry.figures = [
-            PlotlyFigure(label='Trajectories', figure=figure.to_plotly_json())
-        ]
+        trajectories = plot_trajectories(plot_tracks, files[plot_kind])
+        figures.append(
+            PlotlyFigure(label='Trajectories', figure=trajectories.to_plotly_json())
+        )
+    # The field is the same for all particles of a frame; the unfiltered tracks
+    # cover the most frames.
+    for table in (tracks, filtered):
+        field = None if table is None else plot_external_field(table, frame_rate)
+        if field is not None:
+            figures.append(
+                PlotlyFigure(label='External field', figure=field.to_plotly_json())
+            )
+            break
+    if figures:
+        entry.figures = figures
     return entry
 
 
