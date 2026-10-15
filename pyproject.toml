@@ -112,6 +112,7 @@ where = ["src"]
 
 [project.entry-points.'nomad.plugin']
 age_samples = "nomad_age.apps:age_samples"
+particle_tracking_app = "nomad_age.apps:particle_tracking"
 age_schema_entry_point = "nomad_age.schema_packages:age_schema_entry_point"
 lmoke_parser_entry_point = "nomad_age.parsers:lmoke_parser_entry_point"
 lmokeandvmoke_schema_entry_point = "nomad_age.schema_packages:lmokeandvmoke_schema_entry_point"
