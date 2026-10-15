@@ -51,3 +51,41 @@ field_cooling_parser_entry_point = FieldCoolingParserEntryPoint(
     mainfile_name_re=r'.*\.(DAT|dat)$',
     mainfile_contents_re=r'#\s+FC-Protokoll\s+#',
 )
+
+
+class ParticleTrackingParserEntryPoint(ParserEntryPoint):
+    parameter: int = Field(0, description='Custom configuration parameter')
+
+    def load(self):
+        from nomad_age.parsers.particle_tracking_parser import ParticleTrackingParser
+
+        return ParticleTrackingParser(**self.dict())
+
+
+particle_tracking_parser_entry_point = ParticleTrackingParserEntryPoint(
+    name='ParticleTrackingParser',
+    description=(
+        'Parser for trackpy trajectory tables (*_trajs.h5) of particle tracking videos.'
+    ),
+    mainfile_name_re=r'.*_trajs\.h5$',
+    mainfile_mime_re=r'application/x-hdf.*',
+    mainfile_contents_dict={'__has_all_keys': ['trajs']},
+)
+
+
+class FocusSweepParserEntryPoint(ParserEntryPoint):
+    parameter: int = Field(0, description='Custom configuration parameter')
+
+    def load(self):
+        from nomad_age.parsers.particle_tracking_parser import FocusSweepParser
+
+        return FocusSweepParser(**self.dict())
+
+
+focus_sweep_parser_entry_point = FocusSweepParserEntryPoint(
+    name='FocusSweepParser',
+    description='Parser for microscope focus sweeps (imgs, poss, tgs).',
+    mainfile_name_re=r'.*\.h5$',
+    mainfile_mime_re=r'application/x-hdf.*',
+    mainfile_contents_dict={'__has_all_keys': ['imgs', 'poss', 'tgs']},
+)

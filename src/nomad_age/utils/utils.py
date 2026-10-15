@@ -71,12 +71,39 @@ def create_archive(entity, archive, file_name, *, overwrite: bool = False):
     return False
 
 
-def find_existing_AGE_sample(lab_id: str):
+def update_entry(entry, eid, archive, logger):
+    """Update the entries with the new archive."""
+    from nomad import files
+    from nomad.search import search
+
+    query = {
+        'entry_id': eid,
+    }
+    search_result = search(
+        owner='all', query=query, user_id=archive.metadata.main_author.user_id
+    )
+    new_entry_dict = entry.m_to_dict()
+    res = search_result.data[0]
+    try:
+        # Open Archives
+        with files.UploadFiles.get(upload_id=res['upload_id']).read_archive(
+            entry_id=res['entry_id']
+        ) as ar:
+            entry_id = res['entry_id']
+            entry_data = ar[entry_id]['data']
+            entry_data.pop('m_def', None)
+            new_entry_dict.update(entry_data)
+    except Exception as e:
+        logger.error('Error in processing data: ', e)
+    return type(entry).m_from_dict(new_entry_dict)
+
+
+def find_existing_AGE_sample(lab_id: str, user_id=None):
     """Searches all entries in the database for matching lab_id."""
     from nomad.search import search
 
     query = {'results.eln.lab_ids': lab_id}
-    search_result = search(query=query, owner='visible')
+    search_result = search(query=query, owner='visible', user_id=user_id)
     return search_result
 
 

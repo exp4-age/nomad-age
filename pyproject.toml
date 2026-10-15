@@ -28,7 +28,8 @@ license = { file = "LICENSE" }
 dependencies = [
     "nomad-lab>=1.3.0",
     "python-magic-bin; sys_platform == 'win32'",
-    "evaluix>=0.9.4"
+    "evaluix>=0.9.4",
+    "tables>=3.9"
 ]
 
 [project.urls]
@@ -116,6 +117,9 @@ lmokeandvmoke_schema_entry_point = "nomad_age.schema_packages:lmokeandvmoke_sche
 lmokenormalizer_entry_point = "nomad_age.normalizers:lmokenormalizer_entry_point"
 field_cooling_schema = "nomad_age.schema_packages:field_cooling_schema_entry_point"
 field_cooling_parser_entry_point = "nomad_age.parsers:field_cooling_parser_entry_point"
+particle_tracking_schema = "nomad_age.schema_packages:particle_tracking_schema_entry_point"
+particle_tracking_parser_entry_point = "nomad_age.parsers:particle_tracking_parser_entry_point"
+focus_sweep_parser_entry_point = "nomad_age.parsers:focus_sweep_parser_entry_point"
 
 [tool.cruft]
 # Avoid updating workflow files, this leads to permissions issues

@@ -1,6 +1,5 @@
 import os
 import re
-import sys
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -22,41 +21,12 @@ from nomad_age.utils.utils import (
     find_existing_AGE_sample,
     get_entry_id,
     get_hash_ref,
+    update_entry,
 )
 
 configuration = config.get_plugin_entry_point(
     'nomad_age.parsers:field_cooling_parser_entry_point'
 )
-
-
-def update_entry(entry, eid, archive, logger):
-    """Update the entries with the new archive."""
-    from nomad import files
-    from nomad.search import search
-
-    query = {
-        'entry_id': eid,
-    }
-    search_result = search(
-        owner='all', query=query, user_id=archive.metadata.main_author.user_id
-    )
-    new_entry_dict = entry.m_to_dict()
-    res = search_result.data[0]
-    try:
-        # Open Archives
-        with files.UploadFiles.get(upload_id=res['upload_id']).read_archive(
-            entry_id=res['entry_id']
-        ) as ar:
-            entry_id = res['entry_id']
-            entry_data = ar[entry_id]['data']
-            entry_data.pop('m_def', None)
-            new_entry_dict.update(entry_data)
-    except Exception as e:
-        logger.error('Error in processing data: ', e)
-    new_entry = getattr(sys.modules[__name__], type(entry).__name__).m_from_dict(
-        new_entry_dict
-    )
-    return new_entry
 
 
 def parse_date(date_str: str) -> datetime:

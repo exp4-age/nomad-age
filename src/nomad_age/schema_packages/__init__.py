@@ -45,3 +45,18 @@ field_cooling_schema_entry_point = FieldCoolingSchemaEntryPoint(
     name='FieldCoolingSchema',
     description='Entry Point for custom Field Cooling schema.',
 )
+
+
+class ParticleTrackingSchemaEntryPoint(SchemaPackageEntryPoint):
+    parameter: int = Field(0, description='Custom configuration parameter')
+
+    def load(self):
+        from nomad_age.schema_packages.particle_tracking_schema import m_package
+
+        return m_package  # Package with particle tracking and focus sweep schemata
+
+
+particle_tracking_schema_entry_point = ParticleTrackingSchemaEntryPoint(
+    name='ParticleTrackingSchema',
+    description='Entry Point for particle tracking and focus sweep schemata.',
+)
