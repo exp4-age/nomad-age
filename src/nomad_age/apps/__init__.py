@@ -114,14 +114,19 @@ age_samples = AppEntryPoint(
     ),
 )
 
-tracking_schema = (
-    'nomad_age.schema_packages.particle_tracking_schema.AGE_ParticleTracking'
-)
+schema_package = 'nomad_age.schema_packages.particle_tracking_schema'
+tracking_schema = f'{schema_package}.AGE_ParticleTracking'
+video_schema = f'{schema_package}.AGE_ParticleTransportVideo'
 
 
 def tracking(path: str) -> str:
     """Search quantity of a particle tracking measurement."""
     return f'data.{path}#{tracking_schema}'
+
+
+def video(path: str) -> str:
+    """Search quantity of a particle transport video."""
+    return f'data.{path}#{video_schema}'
 
 
 count = Format(decimals=0, mode='standard')
@@ -138,13 +143,204 @@ def widget_layout(sm, md, lg, xl, xxl) -> dict:
     }
 
 
+def particle_transport_app(
+    *,
+    schema: str,
+    label: str,
+    path: str,
+    description: str,
+    readme: str,
+    menu_title: str,
+    columns: list,
+) -> App:
+    """Search app for one entry type of particle transport experiments.
+
+    Videos and tracks share the recording quantities; `columns` are the
+    type-specific ones, shown after the frame count. NOMAD 1.4.3 registers
+    nested search quantities such as samples.lab_id only per entry type, so each
+    type gets its own app.
+    """
+
+    def q(quantity: str) -> str:
+        return f'data.{quantity}#{schema}'
+
+    return App(
+        label=label,
+        path=path,
+        category='Experiment',
+        description=description,
+        readme=readme,
+        search_quantities=SearchQuantities(
+            include=[
+                f'*#{schema}',
+                'authors.name',
+                'upload_name',
+                'datasets.dataset_name',
+            ]
+        ),
+        filters_locked={'section_defs.definition_qualified_name': [schema]},
+        pagination=Pagination(order_by=q('datetime')),
+        columns=[
+            Column(search_quantity='entry_name', title='Recording', selected=True),
+            Column(search_quantity=q('datetime'), title='Recorded', selected=True),
+            Column(search_quantity=q('lab_id'), title='Recording ID'),
+            Column(
+                search_quantity=q('samples[*].lab_id'), title='Samples', selected=True
+            ),
+            Column(
+                search_quantity=q('instruments[*].lab_id'),
+                title='Instruments',
+                selected=True,
+            ),
+            Column(
+                search_quantity=q('illumination'), title='Illumination', selected=True
+            ),
+            Column(
+                search_quantity=q('frame_rate'),
+                title='Frame rate',
+                unit='Hz',
+                format=Format(decimals=1, mode='standard'),
+                selected=True,
+            ),
+            Column(search_quantity=q('n_frames'), title='Frames', format=count),
+            *columns,
+            Column(
+                search_quantity=q('exposure_time'),
+                title='Exposure time',
+                unit='µs',
+                format=Format(decimals=0, mode='standard'),
+            ),
+            Column(search_quantity=q('camera_model'), title='Camera'),
+            Column(
+                search_quantity=q('pixel_size'),
+                title='Pixel size',
+                unit='µm',
+                format=Format(decimals=3, mode='standard'),
+            ),
+            Column(search_quantity='upload_name', title='Upload'),
+            Column(search_quantity='authors', title='Authors'),
+            Column(search_quantity='upload_create_time', title='Uploaded'),
+        ],
+        # No histograms for the frame, particle and localization counts: the GUI
+        # bins integers with width 1, which exceeds the Elasticsearch bucket limit
+        # for localizations. The counts can be sorted in the results table instead.
+        menu=Menu(
+            title=menu_title,
+            items=[
+                Menu(
+                    title='Samples',
+                    items=[
+                        MenuItemTerms(
+                            search_quantity=q('samples.lab_id'), title='Sample ID'
+                        ),
+                    ],
+                ),
+                Menu(
+                    title='Microscope',
+                    items=[
+                        MenuItemTerms(
+                            search_quantity=q('instruments.lab_id'),
+                            title='Instrument ID',
+                        ),
+                        MenuItemTerms(
+                            search_quantity=q('illumination'), show_input=False
+                        ),
+                        MenuItemHistogram(
+                            x=Axis(search_quantity=q('pixel_size'), unit='µm')
+                        ),
+                    ],
+                ),
+                Menu(
+                    title='Camera',
+                    items=[
+                        MenuItemTerms(search_quantity=q('camera_model')),
+                        MenuItemHistogram(
+                            x=Axis(search_quantity=q('frame_rate'), unit='Hz')
+                        ),
+                        MenuItemHistogram(
+                            x=Axis(search_quantity=q('exposure_time'), unit='µs')
+                        ),
+                    ],
+                ),
+                Menu(
+                    title='Recording',
+                    items=[
+                        MenuItemTerms(
+                            search_quantity=q('lab_id'),
+                            title='Recording ID',
+                            options=0,  # one value per recording: input only
+                        ),
+                        MenuItemHistogram(
+                            x=Axis(search_quantity=q('datetime')), title='Recorded'
+                        ),
+                        MenuItemTerms(search_quantity='authors.name'),
+                        MenuItemTerms(search_quantity='upload_name'),
+                        MenuItemTerms(search_quantity='datasets.dataset_name'),
+                    ],
+                ),
+            ],
+        ),
+        dashboard=Dashboard(
+            widgets=[
+                WidgetTerms(
+                    search_quantity=q('samples.lab_id'),
+                    title='Samples',
+                    layout=widget_layout(
+                        sm=(0, 0, 12, 5),
+                        md=(0, 0, 6, 5),
+                        lg=(0, 0, 8, 5),
+                        xl=(0, 0, 10, 5),
+                        xxl=(0, 0, 12, 5),
+                    ),
+                ),
+                WidgetTerms(
+                    search_quantity=q('instruments.lab_id'),
+                    title='Instruments',
+                    layout=widget_layout(
+                        sm=(0, 5, 12, 5),
+                        md=(6, 0, 6, 5),
+                        lg=(8, 0, 8, 5),
+                        xl=(10, 0, 10, 5),
+                        xxl=(12, 0, 12, 5),
+                    ),
+                ),
+                WidgetTerms(
+                    search_quantity=q('illumination'),
+                    title='Illumination',
+                    show_input=False,
+                    layout=widget_layout(
+                        sm=(0, 10, 12, 4),
+                        md=(12, 0, 6, 5),
+                        lg=(16, 0, 8, 5),
+                        xl=(20, 0, 10, 5),
+                        xxl=(24, 0, 12, 5),
+                    ),
+                ),
+                WidgetHistogram(
+                    x=Axis(search_quantity=q('datetime')),
+                    title='Recorded',
+                    n_bins=30,
+                    autorange=True,
+                    layout=widget_layout(
+                        sm=(0, 14, 12, 5),
+                        md=(0, 5, 18, 5),
+                        lg=(0, 5, 24, 5),
+                        xl=(0, 5, 30, 5),
+                        xxl=(0, 5, 36, 5),
+                    ),
+                ),
+            ]
+        ),
+    )
+
+
 particle_tracking = AppEntryPoint(
     name='particle_tracking',
     description='Search for particle tracking measurements.',
-    app=App(
+    app=particle_transport_app(
+        schema=tracking_schema,
         label='Particle Tracking',
         path='particle_tracking',
-        category='Experiment',
         description='Find particle tracking measurements by sample, objective and '
         'camera settings',
         readme=(
@@ -156,45 +352,8 @@ particle_tracking = AppEntryPoint(
             'recording ID is the random id that the acquisition software gives '
             'each recording; video, tracks and filtered tracks carry it.'
         ),
-        search_quantities=SearchQuantities(
-            include=[
-                f'*#{tracking_schema}',
-                'authors.name',
-                'upload_name',
-                'datasets.dataset_name',
-            ]
-        ),
-        filters_locked={'section_defs.definition_qualified_name': [tracking_schema]},
-        pagination=Pagination(order_by=tracking('datetime')),
+        menu_title='Particle tracking',
         columns=[
-            Column(search_quantity='entry_name', title='Recording', selected=True),
-            Column(
-                search_quantity=tracking('datetime'), title='Recorded', selected=True
-            ),
-            Column(search_quantity=tracking('lab_id'), title='Recording ID'),
-            Column(
-                search_quantity=tracking('samples[*].lab_id'),
-                title='Samples',
-                selected=True,
-            ),
-            Column(
-                search_quantity=tracking('instruments[*].lab_id'),
-                title='Instruments',
-                selected=True,
-            ),
-            Column(
-                search_quantity=tracking('illumination'),
-                title='Illumination',
-                selected=True,
-            ),
-            Column(
-                search_quantity=tracking('frame_rate'),
-                title='Frame rate',
-                unit='Hz',
-                format=Format(decimals=1, mode='standard'),
-                selected=True,
-            ),
-            Column(search_quantity=tracking('n_frames'), title='Frames', format=count),
             Column(
                 search_quantity=tracking('n_particles'),
                 title='Particles',
@@ -216,135 +375,38 @@ particle_tracking = AppEntryPoint(
                 title='Localizations (filtered)',
                 format=count,
             ),
-            Column(
-                search_quantity=tracking('exposure_time'),
-                title='Exposure time',
-                unit='µs',
-                format=Format(decimals=0, mode='standard'),
-            ),
-            Column(search_quantity=tracking('camera_model'), title='Camera'),
-            Column(
-                search_quantity=tracking('pixel_size'),
-                title='Pixel size',
-                unit='µm',
-                format=Format(decimals=3, mode='standard'),
-            ),
-            Column(search_quantity='upload_name', title='Upload'),
-            Column(search_quantity='authors', title='Authors'),
-            Column(search_quantity='upload_create_time', title='Uploaded'),
         ],
-        # No histograms for the frame, particle and localization counts: the GUI
-        # bins integers with width 1, which exceeds the Elasticsearch bucket limit
-        # for localizations. The counts can be sorted in the results table instead.
-        menu=Menu(
-            title='Particle tracking',
-            items=[
-                Menu(
-                    title='Samples',
-                    items=[
-                        MenuItemTerms(
-                            search_quantity=tracking('samples.lab_id'),
-                            title='Sample ID',
-                        ),
-                    ],
-                ),
-                Menu(
-                    title='Microscope',
-                    items=[
-                        MenuItemTerms(
-                            search_quantity=tracking('instruments.lab_id'),
-                            title='Instrument ID',
-                        ),
-                        MenuItemTerms(
-                            search_quantity=tracking('illumination'),
-                            show_input=False,
-                        ),
-                        MenuItemHistogram(
-                            x=Axis(search_quantity=tracking('pixel_size'), unit='µm')
-                        ),
-                    ],
-                ),
-                Menu(
-                    title='Camera',
-                    items=[
-                        MenuItemTerms(search_quantity=tracking('camera_model')),
-                        MenuItemHistogram(
-                            x=Axis(search_quantity=tracking('frame_rate'), unit='Hz')
-                        ),
-                        MenuItemHistogram(
-                            x=Axis(search_quantity=tracking('exposure_time'), unit='µs')
-                        ),
-                    ],
-                ),
-                Menu(
-                    title='Recording',
-                    items=[
-                        MenuItemTerms(
-                            search_quantity=tracking('lab_id'),
-                            title='Recording ID',
-                            options=0,  # one value per recording: input only
-                        ),
-                        MenuItemHistogram(
-                            x=Axis(search_quantity=tracking('datetime')),
-                            title='Recorded',
-                        ),
-                        MenuItemTerms(search_quantity='authors.name'),
-                        MenuItemTerms(search_quantity='upload_name'),
-                        MenuItemTerms(search_quantity='datasets.dataset_name'),
-                    ],
-                ),
-            ],
+    ),
+)
+
+particle_transport_videos = AppEntryPoint(
+    name='particle_transport_videos',
+    description='Search for particle transport videos.',
+    app=particle_transport_app(
+        schema=video_schema,
+        label='Particle Transport Videos',
+        path='particle_transport_videos',
+        description='Find particle transport videos by recording ID, sample, '
+        'objective and camera settings',
+        readme=(
+            'Camera videos of particle transport experiments, as saved by '
+            'harvesters_pg; each entry shows the camera settings and the first '
+            'frame. Chips and particle batches are the samples, objectives the '
+            'instruments. The recording ID is the random id that the acquisition '
+            'software gives each recording: the tracks made from a video carry the '
+            'same one, so filtering by it in Particle Tracking finds them.'
         ),
-        dashboard=Dashboard(
-            widgets=[
-                WidgetTerms(
-                    search_quantity=tracking('samples.lab_id'),
-                    title='Samples',
-                    layout=widget_layout(
-                        sm=(0, 0, 12, 5),
-                        md=(0, 0, 6, 5),
-                        lg=(0, 0, 8, 5),
-                        xl=(0, 0, 10, 5),
-                        xxl=(0, 0, 12, 5),
-                    ),
-                ),
-                WidgetTerms(
-                    search_quantity=tracking('instruments.lab_id'),
-                    title='Instruments',
-                    layout=widget_layout(
-                        sm=(0, 5, 12, 5),
-                        md=(6, 0, 6, 5),
-                        lg=(8, 0, 8, 5),
-                        xl=(10, 0, 10, 5),
-                        xxl=(12, 0, 12, 5),
-                    ),
-                ),
-                WidgetTerms(
-                    search_quantity=tracking('illumination'),
-                    title='Illumination',
-                    show_input=False,
-                    layout=widget_layout(
-                        sm=(0, 10, 12, 4),
-                        md=(12, 0, 6, 5),
-                        lg=(16, 0, 8, 5),
-                        xl=(20, 0, 10, 5),
-                        xxl=(24, 0, 12, 5),
-                    ),
-                ),
-                WidgetHistogram(
-                    x=Axis(search_quantity=tracking('datetime')),
-                    title='Recorded',
-                    n_bins=30,
-                    autorange=True,
-                    layout=widget_layout(
-                        sm=(0, 14, 12, 5),
-                        md=(0, 5, 18, 5),
-                        lg=(0, 5, 24, 5),
-                        xl=(0, 5, 30, 5),
-                        xxl=(0, 5, 36, 5),
-                    ),
-                ),
-            ]
-        ),
+        menu_title='Particle transport videos',
+        columns=[
+            Column(
+                search_quantity=video('duration'),
+                title='Duration',
+                unit='s',
+                format=Format(decimals=1, mode='standard'),
+                selected=True,
+            ),
+            Column(search_quantity=video('frame_width'), title='Width', format=count),
+            Column(search_quantity=video('frame_height'), title='Height', format=count),
+        ],
     ),
 )

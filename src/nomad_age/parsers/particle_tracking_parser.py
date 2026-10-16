@@ -1,3 +1,5 @@
+import base64
+import io
 import os
 import re
 from datetime import datetime
@@ -11,11 +13,13 @@ from nomad.datamodel import EntryArchive
 from nomad.datamodel.metainfo.basesections import CompositeSystemReference
 from nomad.datamodel.metainfo.plot import PlotlyFigure
 from nomad.parsing import MatchingParser
+from PIL import Image
 
 from nomad_age.schema_packages.age_schema import AGE_RawFile, AGE_Sample
 from nomad_age.schema_packages.particle_tracking_schema import (
     AGE_FocusSweep,
     AGE_ParticleTracking,
+    AGE_ParticleTransportVideo,
 )
 from nomad_age.utils.utils import (
     create_archive,
@@ -49,6 +53,8 @@ CHIP_ID_RE = re.compile(r'(?<!\d)\d{4}_\d{4}(?:_\d(?![0-9A-Za-z]))?(?!\d)')
 # 202604081623_..., 20260319_... or the date of a chip id such as 2023_0418_...
 FILENAME_TIME_RE = re.compile(r'(\d{14}|\d{12}|\d{8}|\d{4}_\d{4})(?!\d)')
 FILENAME_TIME_FORMATS = {14: '%Y%m%d%H%M%S', 12: '%Y%m%d%H%M', 8: '%Y%m%d'}
+# The first-frame preview of a video is reduced to at most this width (px).
+MAX_PREVIEW_WIDTH = 960
 
 
 def recording_stem(filename: str) -> str:
@@ -392,6 +398,72 @@ def build_focus_sweep_entry(path: str, rel_path: str) -> AGE_FocusSweep:
     return entry
 
 
+def grayscale_uint8(frame: np.ndarray) -> np.ndarray:
+    """A video frame as 8-bit grayscale; colour channels are averaged."""
+    if frame.ndim == 3:
+        frame = frame.mean(axis=-1).astype(frame.dtype)
+    if frame.dtype == np.uint8:
+        return frame
+    if np.issubdtype(frame.dtype, np.integer):
+        full_scale = np.iinfo(frame.dtype).max
+    else:
+        full_scale = float(np.nanmax(frame)) or 1.0
+    return np.clip(np.nan_to_num(frame) * (255 / full_scale), 0, 255).astype(np.uint8)
+
+
+def plot_first_frame(frame: np.ndarray, source_name: str) -> go.Figure:
+    """The first video frame in grayscale, embedded as PNG image.
+
+    Frames wider than MAX_PREVIEW_WIDTH keep every n-th pixel; the axes stay in
+    pixels of the full frame.
+    """
+    step = -(-frame.shape[1] // MAX_PREVIEW_WIDTH)
+    image = np.ascontiguousarray(grayscale_uint8(frame)[::step, ::step])
+    png = io.BytesIO()
+    Image.fromarray(image).save(png, format='PNG', optimize=True)
+    source = 'data:image/png;base64,' + base64.b64encode(png.getvalue()).decode()
+    fig = go.Figure(go.Image(source=source, dx=step, dy=step))
+    fig.update_layout(
+        title=f'First frame of {source_name}',
+        xaxis=dict(title='x (px)'),
+        # image coordinates as in the trajectory plot: origin top left
+        yaxis=dict(title='y (px)', autorange='reversed', scaleanchor='x', scaleratio=1),
+    )
+    return fig
+
+
+def build_video_entry(path: str, rel_path: str) -> AGE_ParticleTransportVideo:
+    """Entry of a particle transport video; `rel_path` is its upload-relative path."""
+    name = os.path.basename(path)
+    with h5py.File(path, 'r') as f:
+        frames = f['frames']
+        n_frames, height, width = frames.shape[:3]
+        first_frame = frames[0] if n_frames else None  # only this frame is read
+    attrs = read_h5_attrs(path)
+    frame_rate = _float_or_none(attrs.get('fps'))
+    entry = AGE_ParticleTransportVideo(
+        name=os.path.splitext(name)[0],
+        video_file=rel_path,
+        lab_id=attrs.get(RECORDING_ID_ATTR),
+        frame_rate=frame_rate,
+        exposure_time=_float_or_none(attrs.get('ExposureTime')),
+        camera_model=attrs.get('DeviceModelName'),
+        n_frames=n_frames,
+        frame_width=width,
+        frame_height=height,
+        duration=n_frames / frame_rate if frame_rate else None,
+        datetime=parse_timestamp(attrs.get('timestamp')) or time_from_filename(path),
+        camera_settings=attrs or None,
+    )
+    if first_frame is not None:
+        entry.illumination = guess_illumination(first_frame)
+        figure = plot_first_frame(first_frame, name)
+        entry.figures = [
+            PlotlyFigure(label='First frame', figure=figure.to_plotly_json())
+        ]
+    return entry
+
+
 def link_AGE_samples(entry, lab_ids: list, archive: EntryArchive, logger) -> None:
     """Reference the AGE samples with the given lab ids; create missing ones."""
     main_author = archive.metadata.main_author
@@ -474,5 +546,16 @@ class FocusSweepParser(MatchingParser):
         logger.info(f'FocusSweepParser called on {mainfile}')
         rel_mainfile = archive.metadata.mainfile or os.path.basename(mainfile)
         entry = build_focus_sweep_entry(mainfile, rel_mainfile)
+        link_AGE_samples(entry, chip_ids_from_filename(mainfile), archive, logger)
+        store_entry(entry, archive, f'{rel_mainfile}.archive.yaml', logger)
+
+
+class ParticleTransportVideoParser(MatchingParser):
+    def parse(
+        self, mainfile: str, archive: EntryArchive, logger, child_archives=None
+    ) -> None:
+        logger.info(f'ParticleTransportVideoParser called on {mainfile}')
+        rel_mainfile = archive.metadata.mainfile or os.path.basename(mainfile)
+        entry = build_video_entry(mainfile, rel_mainfile)
         link_AGE_samples(entry, chip_ids_from_filename(mainfile), archive, logger)
         store_entry(entry, archive, f'{rel_mainfile}.archive.yaml', logger)

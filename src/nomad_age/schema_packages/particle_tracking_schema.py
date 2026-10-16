@@ -37,51 +37,19 @@ class AGE_ParticleMicroscopy(ArchiveSection):
     )
 
 
-class AGE_ParticleTracking(AGE_ParticleMicroscopy, PlotSection, Measurement, EntryData):
-    m_def = Section(
-        label='Particle Tracking',
-        description='Particle trajectories tracked with trackpy in a microscope video.',
-        a_eln=ELNAnnotation(
-            properties=SectionProperties(
-                editable=dict(
-                    exclude=[
-                        'lab_id',
-                        'tracks_file',
-                        'filtered_tracks_file',
-                        'video_file',
-                    ]
-                ),
-            )
-        ),
-    )
+class AGE_ParticleTransport(AGE_ParticleMicroscopy, PlotSection, Measurement):
+    """A particle transport experiment: its camera video and the tracks made from
+    it share these quantities, above all the recording id."""
 
     lab_id = Quantity(
         type=str,
         description=(
             'Random id (attribute recording_id) that the acquisition software gives '
-            'each recording and the tracking scripts copy into the tracks. Empty '
-            'for older recordings.'
+            'each recording; the video and the tracks made from it carry the same '
+            'id. Empty for older recordings.'
         ),
         a_eln=ELNAnnotation(
             component=ELNComponentEnum.StringEditQuantity, label='Recording ID'
-        ),
-    )
-
-    tracks_file = Quantity(
-        type=str,
-        description='trackpy trajectory table (*_trajs.h5) of the recording.',
-        a_eln=ELNAnnotation(
-            component=ELNComponentEnum.FileEditQuantity,
-            label='Tracks File',
-        ),
-    )
-
-    filtered_tracks_file = Quantity(
-        type=str,
-        description='Filtered trajectory table (*_filtered_trajs.h5) of the recording.',
-        a_eln=ELNAnnotation(
-            component=ELNComponentEnum.FileEditQuantity,
-            label='Filtered Tracks File',
         ),
     )
 
@@ -115,7 +83,51 @@ class AGE_ParticleTracking(AGE_ParticleMicroscopy, PlotSection, Measurement, Ent
 
     n_frames = Quantity(
         type=int,
-        description='Video frames covered by the tracks (highest frame index + 1).',
+        description=(
+            'Video frames; for tracks, the frames they cover (highest frame index + 1).'
+        ),
+    )
+
+    camera_settings = Quantity(
+        type=JSON,
+        description='All HDF5 root attributes written by the acquisition software.',
+    )
+
+
+class AGE_ParticleTracking(AGE_ParticleTransport, EntryData):
+    m_def = Section(
+        label='Particle Tracking',
+        description='Particle trajectories tracked with trackpy in a microscope video.',
+        a_eln=ELNAnnotation(
+            properties=SectionProperties(
+                editable=dict(
+                    exclude=[
+                        'lab_id',
+                        'tracks_file',
+                        'filtered_tracks_file',
+                        'video_file',
+                    ]
+                ),
+            )
+        ),
+    )
+
+    tracks_file = Quantity(
+        type=str,
+        description='trackpy trajectory table (*_trajs.h5) of the recording.',
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.FileEditQuantity,
+            label='Tracks File',
+        ),
+    )
+
+    filtered_tracks_file = Quantity(
+        type=str,
+        description='Filtered trajectory table (*_filtered_trajs.h5) of the recording.',
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.FileEditQuantity,
+            label='Filtered Tracks File',
+        ),
     )
 
     n_particles = Quantity(
@@ -138,13 +150,44 @@ class AGE_ParticleTracking(AGE_ParticleMicroscopy, PlotSection, Measurement, Ent
         description='Localizations (table rows) in the filtered tracks.',
     )
 
-    camera_settings = Quantity(
-        type=JSON,
-        description='All HDF5 root attributes written by the acquisition software.',
+    def normalize(self, archive, logger):
+        self.method = 'Particle Tracking'
+        super().normalize(archive, logger)
+
+
+class AGE_ParticleTransportVideo(AGE_ParticleTransport, EntryData):
+    m_def = Section(
+        label='Particle Transport Video',
+        description=(
+            'Camera video of a particle transport experiment, as saved by '
+            'harvesters_pg (HDF5 with a frames dataset).'
+        ),
+        a_eln=ELNAnnotation(
+            properties=SectionProperties(
+                editable=dict(exclude=['lab_id', 'video_file']),
+            )
+        ),
+    )
+
+    frame_width = Quantity(
+        type=int,
+        description='Width of a video frame in pixels.',
+    )
+
+    frame_height = Quantity(
+        type=int,
+        description='Height of a video frame in pixels.',
+    )
+
+    duration = Quantity(
+        type=float,
+        unit='s',
+        description='Recorded time: video frames divided by the frame rate.',
+        a_display={'unit': 's'},
     )
 
     def normalize(self, archive, logger):
-        self.method = 'Particle Tracking'
+        self.method = 'Particle Transport Video'
         super().normalize(archive, logger)
 
 

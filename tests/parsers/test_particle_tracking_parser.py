@@ -1,3 +1,5 @@
+import base64
+import io
 import logging
 from datetime import datetime, timezone
 
@@ -8,24 +10,33 @@ import pytest
 import yaml
 from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.datamodel.context import ClientContext
+from PIL import Image
 
 from nomad_age.parsers import (
     focus_sweep_parser_entry_point,
     particle_tracking_parser_entry_point,
+    particle_transport_video_parser_entry_point,
 )
 from nomad_age.parsers.particle_tracking_parser import (
+    MAX_PREVIEW_WIDTH,
     ParticleTrackingParser,
+    ParticleTransportVideoParser,
     build_particle_tracking_entry,
+    build_video_entry,
     chip_ids_from_filename,
     find_recording_files,
     guess_illumination,
     parse_timestamp,
     plot_external_field,
+    plot_first_frame,
     plot_trajectories,
     time_from_filename,
 )
 from nomad_age.schema_packages.age_schema import AGE_RawFile
-from nomad_age.schema_packages.particle_tracking_schema import AGE_ParticleTracking
+from nomad_age.schema_packages.particle_tracking_schema import (
+    AGE_ParticleTracking,
+    AGE_ParticleTransportVideo,
+)
 from nomad_age.utils.utils import (
     get_hash_ref,
     merge_stored_values,
@@ -49,9 +60,11 @@ def recording(recording_id):
     return {**CAMERA_ATTRS, 'recording_id': recording_id}
 
 
-def write_video(path, attrs=CAMERA_ATTRS):
+def write_video(path, attrs=CAMERA_ATTRS, frames=None):
+    if frames is None:
+        frames = np.zeros((3, 4, 6), dtype=np.uint8)
     with h5py.File(path, 'w') as f:
-        f.create_dataset('frames', data=np.zeros((3, 4, 6), dtype=np.uint8))
+        f.create_dataset('frames', data=frames)
         f.create_dataset('timestamps', data=np.array([0.0, 0.01, 0.02]))
         f.create_dataset('frame_counters', data=np.arange(3, dtype=np.uint32))
         for key, value in attrs.items():
@@ -323,6 +336,12 @@ def test_external_field_is_plotted_once_per_frame():
 
 def test_reprocessing_keeps_user_edits_and_refreshes_parsed_values():
     editable = user_editable_keys(AGE_ParticleTracking.m_def)
+    assert not user_editable_keys(AGE_ParticleTransportVideo.m_def) & {
+        'lab_id',
+        'video_file',
+        'n_frames',
+        'figures',
+    }
     assert {'illumination', 'pixel_size', 'datetime', 'samples'} <= editable
     assert not editable & {
         'figures',
@@ -394,3 +413,71 @@ def test_focus_sweep_parser_matches_sweeps_only(tmp_path):
 
     assert matches(parser, tmp_path / '20250227110207_focus_sweep.h5')
     assert not matches(parser, tmp_path / 'rec.h5')
+
+
+def decode_png(figure: dict) -> np.ndarray:
+    """Pixels of the PNG that a first-frame figure embeds."""
+    source = figure['data'][0]['source']
+    return np.array(Image.open(io.BytesIO(base64.b64decode(source.split(',', 1)[1]))))
+
+
+def test_video_parser_matches_videos_only(tmp_path):
+    write_video(tmp_path / 'rec.h5')
+    write_tracks(tmp_path / 'rec_trajs.h5', make_tracks(), CAMERA_ATTRS)
+    write_focus_sweep(tmp_path / '20250227110207_focus_sweep.h5')
+    parser = particle_transport_video_parser_entry_point.load()
+
+    assert matches(parser, tmp_path / 'rec.h5')
+    assert not matches(parser, tmp_path / 'rec_trajs.h5')
+    assert not matches(parser, tmp_path / '20250227110207_focus_sweep.h5')
+
+
+def test_video_entry_shows_camera_settings_and_grayscale_first_frame(tmp_path):
+    frames = np.full((3, 4, 6), 255, dtype=np.uint8)
+    frames[0] = np.arange(24, dtype=np.uint8).reshape(4, 6) * 10
+    write_video(tmp_path / 'rec.h5', recording(ID_A), frames)
+
+    entry = build_video_entry(str(tmp_path / 'rec.h5'), 'sub/rec.h5')
+
+    assert (entry.name, entry.video_file, entry.lab_id) == ('rec', 'sub/rec.h5', ID_A)
+    assert (entry.n_frames, entry.frame_width, entry.frame_height) == (3, 6, 4)
+    assert entry.frame_rate.to('Hz').magnitude == 100
+    assert entry.duration.to('s').magnitude == pytest.approx(0.03)
+    assert entry.camera_model == 'MC2066'
+    assert entry.datetime == datetime(2026, 4, 15, 12, 43, 48, tzinfo=timezone.utc)
+    (figure,) = entry.figures
+    assert figure.label == 'First frame'
+    np.testing.assert_array_equal(decode_png(figure.figure), frames[0])
+
+
+def test_wide_first_frames_are_reduced_but_keep_pixel_coordinates():
+    frame = np.tile((np.arange(2000) % 256).astype(np.uint8), (10, 1))
+
+    figure = plot_first_frame(frame, 'wide.h5').to_plotly_json()
+
+    image, step = decode_png(figure), figure['data'][0]['dx']
+    assert image.shape[1] <= MAX_PREVIEW_WIDTH
+    assert image.shape[1] * step >= frame.shape[1]
+    np.testing.assert_array_equal(image, frame[::step, ::step])
+
+
+def test_video_parse_writes_entry_yaml_that_round_trips(tmp_path):
+    write_video(tmp_path / 'rec.h5', recording(ID_A))
+    archive = EntryArchive(
+        m_context=ClientContext(local_dir=str(tmp_path)),
+        metadata=EntryMetadata(mainfile='rec.h5', upload_id='test_upload'),
+    )
+
+    ParticleTransportVideoParser().parse(
+        str(tmp_path / 'rec.h5'), archive, logging.getLogger(__name__)
+    )
+
+    assert isinstance(archive.data, AGE_RawFile)
+    with open(tmp_path / 'rec.h5.archive.yaml') as f:
+        data = yaml.safe_load(f)['data']
+    assert data['m_def'] == (
+        'nomad_age.schema_packages.particle_tracking_schema.AGE_ParticleTransportVideo'
+    )
+    entry = AGE_ParticleTransportVideo.m_from_dict(data)
+    assert (entry.lab_id, entry.n_frames) == (ID_A, 3)
+    assert [f.label for f in entry.figures] == ['First frame']

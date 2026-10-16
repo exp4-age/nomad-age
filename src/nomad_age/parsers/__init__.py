@@ -89,3 +89,23 @@ focus_sweep_parser_entry_point = FocusSweepParserEntryPoint(
     mainfile_mime_re=r'application/x-hdf.*',
     mainfile_contents_dict={'__has_all_keys': ['imgs', 'poss', 'tgs']},
 )
+
+
+class ParticleTransportVideoParserEntryPoint(ParserEntryPoint):
+    parameter: int = Field(0, description='Custom configuration parameter')
+
+    def load(self):
+        from nomad_age.parsers.particle_tracking_parser import (
+            ParticleTransportVideoParser,
+        )
+
+        return ParticleTransportVideoParser(**self.dict())
+
+
+particle_transport_video_parser_entry_point = ParticleTransportVideoParserEntryPoint(
+    name='ParticleTransportVideoParser',
+    description='Parser for particle transport videos (HDF5 with a frames dataset).',
+    mainfile_name_re=r'.*\.h5$',
+    mainfile_mime_re=r'application/x-hdf.*',
+    mainfile_contents_dict={'__has_all_keys': ['frames']},
+)

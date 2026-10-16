@@ -30,6 +30,7 @@ dependencies = [
     "python-magic-bin; sys_platform == 'win32'",
     "evaluix>=0.9.4",
     "tables>=3.9",
+    "pillow",
     "tzdata"
 ]
 
@@ -113,6 +114,7 @@ where = ["src"]
 [project.entry-points.'nomad.plugin']
 age_samples = "nomad_age.apps:age_samples"
 particle_tracking_app = "nomad_age.apps:particle_tracking"
+particle_transport_videos_app = "nomad_age.apps:particle_transport_videos"
 age_schema_entry_point = "nomad_age.schema_packages:age_schema_entry_point"
 lmoke_parser_entry_point = "nomad_age.parsers:lmoke_parser_entry_point"
 lmokeandvmoke_schema_entry_point = "nomad_age.schema_packages:lmokeandvmoke_schema_entry_point"
@@ -122,6 +124,7 @@ field_cooling_parser_entry_point = "nomad_age.parsers:field_cooling_parser_entry
 particle_tracking_schema = "nomad_age.schema_packages:particle_tracking_schema_entry_point"
 particle_tracking_parser_entry_point = "nomad_age.parsers:particle_tracking_parser_entry_point"
 focus_sweep_parser_entry_point = "nomad_age.parsers:focus_sweep_parser_entry_point"
+particle_transport_video_parser_entry_point = "nomad_age.parsers:particle_transport_video_parser_entry_point"
 
 [tool.cruft]
 # Avoid updating workflow files, this leads to permissions issues
