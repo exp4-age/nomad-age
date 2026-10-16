@@ -97,7 +97,11 @@ class AGE_ParticleTransport(AGE_ParticleMicroscopy, PlotSection, Measurement):
 class AGE_ParticleTracking(AGE_ParticleTransport, EntryData):
     m_def = Section(
         label='Particle Tracking',
-        description='Particle trajectories tracked with trackpy in a microscope video.',
+        description=(
+            'Particle trajectories tracked with trackpy in a microscope video. If the '
+            'video of the recording has an entry in the same folder, samples (chips, '
+            'particles) and instruments (objective) come from it and are edited there.'
+        ),
         a_eln=ELNAnnotation(
             properties=SectionProperties(
                 editable=dict(
@@ -160,7 +164,10 @@ class AGE_ParticleTransportVideo(AGE_ParticleTransport, EntryData):
         label='Particle Transport Video',
         description=(
             'Camera video of a particle transport experiment, as saved by '
-            'harvesters_pg (HDF5 with a frames dataset).'
+            'harvesters_pg (HDF5 with a frames dataset). Particles and objective '
+            'come from its attributes particles and objective or are added here; '
+            'the tracks entries of the recording take over its samples and '
+            'instruments.'
         ),
         a_eln=ELNAnnotation(
             properties=SectionProperties(
@@ -189,6 +196,13 @@ class AGE_ParticleTransportVideo(AGE_ParticleTransport, EntryData):
     def normalize(self, archive, logger):
         self.method = 'Particle Transport Video'
         super().normalize(archive, logger)
+        # The parser module imports this one.
+        from nomad_age.parsers.particle_tracking_parser import share_with_tracks
+
+        try:
+            share_with_tracks(self, archive, logger)
+        except Exception as e:
+            logger.warning(f'Tracks entries not updated from this video: {e!r}')
 
 
 class AGE_FocusSweep(AGE_ParticleMicroscopy, PlotSection, Measurement, EntryData):

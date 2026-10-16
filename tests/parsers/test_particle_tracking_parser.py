@@ -30,6 +30,7 @@ from nomad_age.parsers.particle_tracking_parser import (
     plot_external_field,
     plot_frame,
     plot_trajectories,
+    share_with_tracks,
     time_from_filename,
 )
 from nomad_age.schema_packages.age_schema import AGE_RawFile
@@ -58,6 +59,26 @@ ID_B = '7e8f9a0b-1c2d-4e3f-9a4b-5c6d7e8f9a0b'
 def recording(recording_id):
     """Attributes of a recording saved since harvesters_pg writes recording ids."""
     return {**CAMERA_ATTRS, 'recording_id': recording_id}
+
+
+def with_inventory(attrs, particles, objective):
+    """Attributes plus the lab ids of the particles and objective of a recording."""
+    return {**attrs, 'particles': particles, 'objective': objective}
+
+
+def lab_ids(references):
+    return [reference['lab_id'] for reference in references or []]
+
+
+def parse(parser, tmp_path, mainfile):
+    """Parse `mainfile` of an upload in `tmp_path`; the data of its entry YAML."""
+    archive = EntryArchive(
+        m_context=ClientContext(local_dir=str(tmp_path)),
+        metadata=EntryMetadata(mainfile=mainfile, upload_id='test_upload'),
+    )
+    parser.parse(str(tmp_path / mainfile), archive, logging.getLogger(__name__))
+    with open(tmp_path / f'{mainfile}.archive.yaml') as f:
+        return yaml.safe_load(f)['data']
 
 
 def write_video(path, attrs=CAMERA_ATTRS, frames=None):
@@ -491,3 +512,71 @@ def test_video_parse_writes_entry_yaml_that_round_trips(tmp_path):
     entry = AGE_ParticleTransportVideo.m_from_dict(data)
     assert (entry.lab_id, entry.n_frames) == (ID_A, 3)
     assert [f.label for f in entry.figures] == ['First frame', 'Last frame']
+
+
+def test_video_links_particles_and_objective_from_its_attributes(tmp_path):
+    particles = np.array(['M270-2024-03', 'M450-2023-01'], dtype=h5py.string_dtype())
+    attrs = with_inventory(recording(ID_A), particles, 'OBJ-20x')
+    write_video(tmp_path / 'rec.h5', attrs)
+
+    entry = build_video_entry(str(tmp_path / 'rec.h5'), 'rec.h5')
+
+    assert [s.lab_id for s in entry.samples] == ['M270-2024-03', 'M450-2023-01']
+    assert [i.lab_id for i in entry.instruments] == ['OBJ-20x']
+
+
+def test_tracks_without_video_entry_link_their_own_particles_and_objective(tmp_path):
+    attrs = with_inventory(recording(ID_A), 'M270-2024-03, M450-2023-01', 'OBJ-20x')
+    write_tracks(tmp_path / 'rec_trajs.h5', make_tracks(), attrs)
+
+    tracks = parse(ParticleTrackingParser(), tmp_path, 'rec_trajs.h5')
+
+    assert lab_ids(tracks['samples']) == ['M270-2024-03', 'M450-2023-01']
+    assert lab_ids(tracks['instruments']) == ['OBJ-20x']
+
+
+def test_tracks_take_samples_and_instruments_from_the_video_entry(tmp_path):
+    attrs = with_inventory(recording(ID_A), 'M270-2024-03', 'OBJ-20x')
+    write_video(tmp_path / 'rec.h5', attrs)
+    write_tracks(tmp_path / 'rec_trajs.h5', make_tracks(), attrs)
+    video = parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+    # corrected in the GUI after the upload
+    video['instruments'] = [{'name': 'OBJ-50x', 'lab_id': 'OBJ-50x'}]
+    with open(tmp_path / 'rec.h5.archive.yaml', 'w') as f:
+        yaml.dump({'data': video}, f)
+
+    tracks = parse(ParticleTrackingParser(), tmp_path, 'rec_trajs.h5')
+
+    assert lab_ids(tracks['samples']) == ['M270-2024-03']
+    assert lab_ids(tracks['instruments']) == ['OBJ-50x']
+
+
+def test_video_entry_passes_its_samples_and_instruments_to_its_tracks(tmp_path):
+    write_tracks(tmp_path / 'rec_trajs.h5', make_tracks(), recording(ID_A))
+    write_tracks(tmp_path / 'other_trajs.h5', make_tracks(), recording(ID_B))
+    parse(ParticleTrackingParser(), tmp_path, 'rec_trajs.h5')
+    other = parse(ParticleTrackingParser(), tmp_path, 'other_trajs.h5')
+    # uploaded later, under another name
+    attrs = with_inventory(recording(ID_A), 'M270-2024-03', 'OBJ-20x')
+    write_video(tmp_path / 'renamed.h5', attrs)
+    video = parse(ParticleTransportVideoParser(), tmp_path, 'renamed.h5')
+    archive = EntryArchive(
+        m_context=ClientContext(local_dir=str(tmp_path)),
+        metadata=EntryMetadata(
+            mainfile='renamed.h5.archive.yaml', upload_id='test_upload'
+        ),
+    )
+
+    share_with_tracks(
+        AGE_ParticleTransportVideo.m_from_dict(video),
+        archive,
+        logging.getLogger(__name__),
+    )
+
+    with open(tmp_path / 'rec_trajs.h5.archive.yaml') as f:
+        tracks = yaml.safe_load(f)['data']
+    assert lab_ids(tracks['samples']) == ['M270-2024-03']
+    assert lab_ids(tracks['instruments']) == ['OBJ-20x']
+    assert tracks['n_particles'] == 3
+    with open(tmp_path / 'other_trajs.h5.archive.yaml') as f:
+        assert yaml.safe_load(f)['data'] == other

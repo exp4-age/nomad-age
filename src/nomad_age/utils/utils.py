@@ -124,9 +124,10 @@ def merge_stored_values(fresh: dict, stored, editable: set) -> dict:
     return merged
 
 
-def update_entry(entry, eid, archive, logger):
+def update_entry(entry, eid, archive, logger, parsed_wins=()):
     """`entry` merged with the stored entry `eid` of the same upload, see
-    merge_stored_values.
+    merge_stored_values; for the keys in `parsed_wins` the parsed value wins even
+    if users may edit it.
 
     The stored archive is read directly, not via the search index: NOMAD 1.4.3
     parses each file of a new upload twice, and on the second run the entry
@@ -140,9 +141,8 @@ def update_entry(entry, eid, archive, logger):
         with upload_files.read_archive(entry_id=eid) as ar:
             entry_data = ar[eid]['data']
             entry_data.pop('m_def', None)
-            new_entry_dict = merge_stored_values(
-                new_entry_dict, entry_data, user_editable_keys(type(entry).m_def)
-            )
+            editable = user_editable_keys(type(entry).m_def) - set(parsed_wins)
+            new_entry_dict = merge_stored_values(new_entry_dict, entry_data, editable)
     except Exception as e:
         logger.error(f'Stored entry {eid} could not be merged: {e!r}')
     return type(entry).m_from_dict(new_entry_dict)

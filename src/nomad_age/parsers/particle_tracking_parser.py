@@ -9,8 +9,12 @@ import h5py
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import yaml
 from nomad.datamodel import EntryArchive
-from nomad.datamodel.metainfo.basesections import CompositeSystemReference
+from nomad.datamodel.metainfo.basesections import (
+    CompositeSystemReference,
+    InstrumentReference,
+)
 from nomad.datamodel.metainfo.plot import PlotlyFigure
 from nomad.parsing import MatchingParser
 from PIL import Image
@@ -36,6 +40,12 @@ FILTERED_TRACKS_SUFFIX = '_filtered_trajs.h5'
 # Random id that the acquisition software (harvesters_pg) gives each recording;
 # the tracking scripts copy it from the video into the (filtered) tracks.
 RECORDING_ID_ATTR = 'recording_id'
+# Optional attributes with the lab ids of the particle batches (AGE_Particles)
+# and of the objective (AGE_Objective) of a recording: one id, comma-separated
+# ids or a list of ids.
+PARTICLES_ATTR = 'particles'
+OBJECTIVE_ATTR = 'objective'
+YAML_LOADER = getattr(yaml, 'CSafeLoader', yaml.SafeLoader)
 PYTABLES_ATTRS = {'CLASS', 'PYTABLES_FORMAT_VERSION', 'TITLE', 'VERSION'}
 REQUIRED_TRACK_COLUMNS = ('x', 'y', 'frame', 'particle')
 MAX_PLOT_TRACKS = 100
@@ -457,6 +467,7 @@ def build_video_entry(path: str, rel_path: str) -> AGE_ParticleTransportVideo:
         datetime=parse_timestamp(attrs.get('timestamp')) or time_from_filename(path),
         camera_settings=attrs or None,
     )
+    link_particles_and_objective(entry, attrs)
     if first_frame is not None:
         entry.illumination = guess_illumination(first_frame)
         figure = plot_frame(first_frame, f'First frame of {name}')
@@ -498,16 +509,107 @@ def link_AGE_samples(entry, lab_ids: list, archive: EntryArchive, logger) -> Non
         )
 
 
-def store_entry(entry, archive: EntryArchive, entry_file_name: str, logger) -> None:
-    """Write `entry` as YAML entry; on reprocessing, existing values win."""
+def lab_ids_from_attr(value) -> list:
+    """Lab ids in an attribute value: one id, comma-separated ids or a list."""
+    if value is None:
+        return []
+    values = value if isinstance(value, list) else [value]
+    ids = (part.strip() for v in values for part in str(v).split(','))
+    return list(dict.fromkeys(i for i in ids if i))
+
+
+def link_particles_and_objective(entry, attrs: dict) -> None:
+    """Link the particle batches and the objective that the attributes name.
+
+    Only the lab ids are set; when NOMAD normalizes the entry, it resolves them
+    to the inventory entries with these ids.
+    """
+    linked = {sample.lab_id for sample in entry.samples}
+    for lab_id in lab_ids_from_attr(attrs.get(PARTICLES_ATTR)):
+        if lab_id not in linked:
+            entry.samples.append(CompositeSystemReference(name=lab_id, lab_id=lab_id))
+    linked = {instrument.lab_id for instrument in entry.instruments}
+    for lab_id in lab_ids_from_attr(attrs.get(OBJECTIVE_ATTR)):
+        if lab_id not in linked:
+            entry.instruments.append(InstrumentReference(name=lab_id, lab_id=lab_id))
+
+
+def video_samples_and_instruments(archive: EntryArchive, rel_video: str):
+    """Samples and instruments of the entry of a video (upload-relative path), as
+    stored in its YAML; None if the video has no entry."""
+    entry_file = f'{rel_video}.archive.yaml'
+    if not archive.m_context.raw_path_exists(entry_file):
+        return None
+    with archive.m_context.raw_file(entry_file) as f:
+        data = yaml.load(f, Loader=YAML_LOADER).get('data') or {}
+    samples = data.get('samples') or []
+    instruments = data.get('instruments') or []
+    return (
+        [CompositeSystemReference.m_from_dict(sample) for sample in samples],
+        [InstrumentReference.m_from_dict(instrument) for instrument in instruments],
+    )
+
+
+def raw_os_path(context, rel_path: str) -> Optional[str]:
+    """OS path of a raw file of the upload of `context`; None without access."""
+    if getattr(context, 'upload', None) is not None:  # ServerContext
+        return os.path.join(context.raw_path(), rel_path)
+    local_dir = getattr(context, 'local_dir', None)  # ClientContext
+    return os.path.join(local_dir, rel_path) if local_dir else None
+
+
+def share_with_tracks(video, archive: EntryArchive, logger) -> None:
+    """Give the tracks entries of a video's recording the samples and instruments
+    of the video entry, so that they are edited in one place.
+
+    The tracks are found as their parser finds the video: in the same folder, by
+    name or recording id. Tracks entries that change are written and processed
+    again.
+    """
+    if not video.video_file:
+        return
+    path = raw_os_path(archive.m_context, video.video_file)
+    if path is None or not os.path.isfile(path):
+        return
+    directory, video_name = os.path.split(path)
+    rel_directory = os.path.dirname(video.video_file)
+    shared = {
+        'samples': [sample.m_to_dict() for sample in video.samples],
+        'instruments': [instrument.m_to_dict() for instrument in video.instruments],
+    }
+    for name in sorted(os.listdir(directory)):
+        entry_file = os.path.join(rel_directory, f'{name}.archive.yaml')
+        if not name.endswith(TRACKS_SUFFIX):
+            continue
+        if not archive.m_context.raw_path_exists(entry_file):
+            continue  # filtered tracks next to their unfiltered tracks
+        recording_id = read_recording_id(os.path.join(directory, name))
+        files = find_recording_files(directory, recording_stem(name), recording_id)
+        if files['video'] != video_name:
+            continue
+        with archive.m_context.raw_file(entry_file) as f:
+            data = yaml.load(f, Loader=YAML_LOADER)['data']
+        if all((data.get(key) or []) == value for key, value in shared.items()):
+            continue
+        data.update(shared)
+        data.pop('m_def', None)
+        tracks = AGE_ParticleTracking.m_from_dict(data)
+        create_archive(tracks, archive, entry_file, overwrite=True)
+        logger.info(f'Samples and instruments of {name} taken from {video_name}')
+
+
+def store_entry(
+    entry, archive: EntryArchive, entry_file_name: str, logger, parsed_wins=()
+) -> None:
+    """Write `entry` as YAML entry; on reprocessing, stored values that users may
+    edit win, except for the keys in `parsed_wins`."""
     upload_id = archive.metadata.upload_id
     archive.data = AGE_RawFile(
         processed_archive=get_hash_ref(upload_id, entry_file_name)
     )
     if not create_archive(entry, archive, entry_file_name):
-        merged = update_entry(
-            entry, get_entry_id(upload_id, entry_file_name), archive, logger
-        )
+        eid = get_entry_id(upload_id, entry_file_name)
+        merged = update_entry(entry, eid, archive, logger, parsed_wins)
         create_archive(merged, archive, entry_file_name, overwrite=True)
 
 
@@ -539,13 +641,28 @@ class ParticleTrackingParser(MatchingParser):
         logger.info(f'ParticleTrackingParser called on {mainfile}')
         rel_mainfile = archive.metadata.mainfile or os.path.basename(mainfile)
         directory = os.path.dirname(mainfile)
+        rel_directory = os.path.dirname(rel_mainfile)
         stem = recording_stem(mainfile)
         files = find_recording_files(directory, stem, read_recording_id(mainfile))
-        entry = build_particle_tracking_entry(
-            directory, os.path.dirname(rel_mainfile), stem, files
-        )
-        link_AGE_samples(entry, chip_ids_from_filename(mainfile), archive, logger)
-        store_entry(entry, archive, f'{rel_mainfile}.archive.yaml', logger)
+        entry = build_particle_tracking_entry(directory, rel_directory, stem, files)
+        from_video = None
+        if files['video']:
+            from_video = video_samples_and_instruments(
+                archive, os.path.join(rel_directory, files['video'])
+            )
+        parsed_wins = ()
+        if from_video is None:
+            link_AGE_samples(entry, chip_ids_from_filename(mainfile), archive, logger)
+            link_particles_and_objective(entry, entry.camera_settings or {})
+        else:
+            # Samples and instruments of a recording are edited in its video entry.
+            samples, instruments = from_video
+            for sample in samples:
+                entry.samples.append(sample)
+            for instrument in instruments:
+                entry.instruments.append(instrument)
+            parsed_wins = ('samples', 'instruments')
+        store_entry(entry, archive, f'{rel_mainfile}.archive.yaml', logger, parsed_wins)
 
 
 class FocusSweepParser(MatchingParser):
