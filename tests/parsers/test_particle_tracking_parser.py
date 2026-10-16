@@ -28,7 +28,7 @@ from nomad_age.parsers.particle_tracking_parser import (
     guess_illumination,
     parse_timestamp,
     plot_external_field,
-    plot_first_frame,
+    plot_frame,
     plot_trajectories,
     time_from_filename,
 )
@@ -432,9 +432,10 @@ def test_video_parser_matches_videos_only(tmp_path):
     assert not matches(parser, tmp_path / '20250227110207_focus_sweep.h5')
 
 
-def test_video_entry_shows_camera_settings_and_grayscale_first_frame(tmp_path):
-    frames = np.full((3, 4, 6), 255, dtype=np.uint8)
+def test_video_entry_shows_camera_settings_and_first_and_last_frame(tmp_path):
+    frames = np.full((3, 4, 6), 128, dtype=np.uint8)
     frames[0] = np.arange(24, dtype=np.uint8).reshape(4, 6) * 10
+    frames[2] = 255 - frames[0]
     write_video(tmp_path / 'rec.h5', recording(ID_A), frames)
 
     entry = build_video_entry(str(tmp_path / 'rec.h5'), 'sub/rec.h5')
@@ -445,15 +446,24 @@ def test_video_entry_shows_camera_settings_and_grayscale_first_frame(tmp_path):
     assert entry.duration.to('s').magnitude == pytest.approx(0.03)
     assert entry.camera_model == 'MC2066'
     assert entry.datetime == datetime(2026, 4, 15, 12, 43, 48, tzinfo=timezone.utc)
-    (figure,) = entry.figures
-    assert figure.label == 'First frame'
-    np.testing.assert_array_equal(decode_png(figure.figure), frames[0])
+    first, last = entry.figures
+    assert (first.label, last.label) == ('First frame', 'Last frame')
+    np.testing.assert_array_equal(decode_png(first.figure), frames[0])
+    np.testing.assert_array_equal(decode_png(last.figure), frames[2])
 
 
-def test_wide_first_frames_are_reduced_but_keep_pixel_coordinates():
+def test_single_frame_video_shows_that_frame_once(tmp_path):
+    write_video(tmp_path / 'rec.h5', frames=np.zeros((1, 4, 6), dtype=np.uint8))
+
+    entry = build_video_entry(str(tmp_path / 'rec.h5'), 'rec.h5')
+
+    assert [f.label for f in entry.figures] == ['First frame']
+
+
+def test_wide_frames_are_reduced_but_keep_pixel_coordinates():
     frame = np.tile((np.arange(2000) % 256).astype(np.uint8), (10, 1))
 
-    figure = plot_first_frame(frame, 'wide.h5').to_plotly_json()
+    figure = plot_frame(frame, 'Wide frame').to_plotly_json()
 
     image, step = decode_png(figure), figure['data'][0]['dx']
     assert image.shape[1] <= MAX_PREVIEW_WIDTH
@@ -480,4 +490,4 @@ def test_video_parse_writes_entry_yaml_that_round_trips(tmp_path):
     )
     entry = AGE_ParticleTransportVideo.m_from_dict(data)
     assert (entry.lab_id, entry.n_frames) == (ID_A, 3)
-    assert [f.label for f in entry.figures] == ['First frame']
+    assert [f.label for f in entry.figures] == ['First frame', 'Last frame']

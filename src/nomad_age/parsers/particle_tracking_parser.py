@@ -411,8 +411,8 @@ def grayscale_uint8(frame: np.ndarray) -> np.ndarray:
     return np.clip(np.nan_to_num(frame) * (255 / full_scale), 0, 255).astype(np.uint8)
 
 
-def plot_first_frame(frame: np.ndarray, source_name: str) -> go.Figure:
-    """The first video frame in grayscale, embedded as PNG image.
+def plot_frame(frame: np.ndarray, title: str) -> go.Figure:
+    """A video frame in grayscale, embedded as PNG image.
 
     Frames wider than MAX_PREVIEW_WIDTH keep every n-th pixel; the axes stay in
     pixels of the full frame.
@@ -424,7 +424,7 @@ def plot_first_frame(frame: np.ndarray, source_name: str) -> go.Figure:
     source = 'data:image/png;base64,' + base64.b64encode(png.getvalue()).decode()
     fig = go.Figure(go.Image(source=source, dx=step, dy=step))
     fig.update_layout(
-        title=f'First frame of {source_name}',
+        title=title,
         xaxis=dict(title='x (px)'),
         # image coordinates as in the trajectory plot: origin top left
         yaxis=dict(title='y (px)', autorange='reversed', scaleanchor='x', scaleratio=1),
@@ -438,7 +438,9 @@ def build_video_entry(path: str, rel_path: str) -> AGE_ParticleTransportVideo:
     with h5py.File(path, 'r') as f:
         frames = f['frames']
         n_frames, height, width = frames.shape[:3]
-        first_frame = frames[0] if n_frames else None  # only this frame is read
+        # only the first and the last frame are read
+        first_frame = frames[0] if n_frames else None
+        last_frame = frames[n_frames - 1] if n_frames > 1 else None
     attrs = read_h5_attrs(path)
     frame_rate = _float_or_none(attrs.get('fps'))
     entry = AGE_ParticleTransportVideo(
@@ -457,10 +459,17 @@ def build_video_entry(path: str, rel_path: str) -> AGE_ParticleTransportVideo:
     )
     if first_frame is not None:
         entry.illumination = guess_illumination(first_frame)
-        figure = plot_first_frame(first_frame, name)
+        figure = plot_frame(first_frame, f'First frame of {name}')
         entry.figures = [
             PlotlyFigure(label='First frame', figure=figure.to_plotly_json())
         ]
+    if last_frame is not None:
+        at = f', {(n_frames - 1) / frame_rate:.2f} s' if frame_rate else ''
+        title = f'Last frame of {name} (frame {n_frames - 1}{at})'
+        figure = plot_frame(last_frame, title)
+        entry.figures.append(
+            PlotlyFigure(label='Last frame', figure=figure.to_plotly_json())
+        )
     return entry
 
 
