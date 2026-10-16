@@ -152,7 +152,9 @@ particle_tracking = AppEntryPoint(
             'batches are the samples of a measurement, objectives its instruments: '
             'filter by their IDs to find all recordings of a chip or particle '
             'batch. Particle and localization counts are read from the tracks '
-            'file, the filtered counts from the filtered tracks file.'
+            'file, the filtered counts from the filtered tracks file. The '
+            'recording ID is the random id that the acquisition software gives '
+            'each recording; video, tracks and filtered tracks carry it.'
         ),
         search_quantities=SearchQuantities(
             include=[
@@ -169,6 +171,7 @@ particle_tracking = AppEntryPoint(
             Column(
                 search_quantity=tracking('datetime'), title='Recorded', selected=True
             ),
+            Column(search_quantity=tracking('lab_id'), title='Recording ID'),
             Column(
                 search_quantity=tracking('samples[*].lab_id'),
                 title='Samples',
@@ -276,6 +279,11 @@ particle_tracking = AppEntryPoint(
                 Menu(
                     title='Recording',
                     items=[
+                        MenuItemTerms(
+                            search_quantity=tracking('lab_id'),
+                            title='Recording ID',
+                            options=0,  # one value per recording: input only
+                        ),
                         MenuItemHistogram(
                             x=Axis(search_quantity=tracking('datetime')),
                             title='Recorded',

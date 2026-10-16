@@ -29,6 +29,9 @@ from nomad_age.utils.utils import (
 
 TRACKS_SUFFIX = '_trajs.h5'
 FILTERED_TRACKS_SUFFIX = '_filtered_trajs.h5'
+# Random id that the acquisition software (harvesters_pg) gives each recording;
+# the tracking scripts copy it from the video into the (filtered) tracks.
+RECORDING_ID_ATTR = 'recording_id'
 PYTABLES_ATTRS = {'CLASS', 'PYTABLES_FORMAT_VERSION', 'TITLE', 'VERSION'}
 REQUIRED_TRACK_COLUMNS = ('x', 'y', 'frame', 'particle')
 MAX_PLOT_TRACKS = 100
@@ -126,6 +129,16 @@ def _is_video(path: str) -> bool:
         return False
 
 
+def read_recording_id(path: str) -> Optional[str]:
+    """The recording_id attribute of an HDF5 file; None without one."""
+    try:
+        with h5py.File(path, 'r') as f:
+            value = f.attrs.get(RECORDING_ID_ATTR)
+    except OSError:
+        return None
+    return None if value is None else str(_to_builtin(value))
+
+
 def guess_illumination(image: np.ndarray) -> Optional[str]:
     """Darkfield images have a dark background, brightfield images a bright one.
 
@@ -141,21 +154,58 @@ def guess_illumination(image: np.ndarray) -> Optional[str]:
     return None
 
 
-def find_recording_files(directory: str, stem: str) -> dict:
+def _file_kind(name: str) -> Optional[str]:
+    if name.endswith(FILTERED_TRACKS_SUFFIX):
+        return 'filtered_tracks'
+    if name.endswith(TRACKS_SUFFIX):
+        return 'tracks'
+    return 'video' if name.endswith('.h5') else None
+
+
+def _paired_by_name(directory: str, name: str, kind: str) -> bool:
+    """Whether (filtered) tracks have their filtered (unfiltered) twin by name."""
+    twin = TRACKS_SUFFIX if kind == 'filtered_tracks' else FILTERED_TRACKS_SUFFIX
+    return os.path.isfile(os.path.join(directory, recording_stem(name) + twin))
+
+
+def find_recording_files(
+    directory: str, stem: str, recording_id: Optional[str] = None
+) -> dict:
     """Basenames of the tracks, filtered tracks and video of a recording.
 
-    Only exact names in the same directory count; missing files and videos that
-    cannot be read are None.
+    Files are found by name in the same directory: {stem}_trajs.h5,
+    {stem}_filtered_trajs.h5 and {stem}.h5. With a recording id, a named file
+    with another id belongs to another recording, and files with the same id
+    count under any name, e.g. after renaming; tracks and filtered tracks that
+    pair up by name are not taken apart. Missing files and videos that cannot
+    be read are None.
     """
-    files = {
+    names = {
         'tracks': f'{stem}{TRACKS_SUFFIX}',
         'filtered_tracks': f'{stem}{FILTERED_TRACKS_SUFFIX}',
         'video': f'{stem}.h5',
     }
-    for kind, name in files.items():
+    files = {}
+    for kind, name in names.items():
         path = os.path.join(directory, name)
-        if not os.path.isfile(path) or (kind == 'video' and not _is_video(path)):
-            files[kind] = None
+        found = os.path.isfile(path) and (kind != 'video' or _is_video(path))
+        if found and recording_id is not None:
+            found = read_recording_id(path) in (None, recording_id)
+        files[kind] = name if found else None
+    if recording_id is None or all(files.values()):
+        return files
+    for name in sorted(os.listdir(directory or '.')):
+        kind = _file_kind(name)
+        if kind is None or files[kind] or name in names.values():
+            continue
+        path = os.path.join(directory, name)
+        if read_recording_id(path) != recording_id:
+            continue
+        if kind == 'video' and not _is_video(path):
+            continue
+        if kind != 'video' and _paired_by_name(directory, name, kind):
+            continue
+        files[kind] = name
     return files
 
 
@@ -256,7 +306,7 @@ def build_particle_tracking_entry(
     if frame_source is not None and len(frame_source):
         entry.n_frames = int(frame_source['frame'].max()) + 1
 
-    # Older tracks and all filtered tracks lack the camera attributes.
+    # Older tracks and filtered tracks lack the camera attributes.
     frame_rate = None
     for kind in ('tracks', 'filtered_tracks', 'video'):
         if not files[kind]:
@@ -268,6 +318,7 @@ def build_particle_tracking_entry(
             entry.frame_rate = frame_rate
             entry.exposure_time = _float_or_none(settings.get('ExposureTime'))
             entry.camera_model = settings.get('DeviceModelName')
+            entry.lab_id = settings.get(RECORDING_ID_ATTR)
             entry.datetime = parse_timestamp(settings.get('timestamp'))
             break
     if entry.datetime is None:
@@ -393,8 +444,12 @@ class ParticleTrackingParser(MatchingParser):
         )
         if is_match and filename.endswith(FILTERED_TRACKS_SUFFIX):
             # One entry per recording: the unfiltered tracks are its mainfile.
-            unfiltered = filename[: -len(FILTERED_TRACKS_SUFFIX)] + TRACKS_SUFFIX
-            return not os.path.isfile(unfiltered)
+            files = find_recording_files(
+                os.path.dirname(filename),
+                recording_stem(filename),
+                read_recording_id(filename),
+            )
+            return files['tracks'] is None
         return is_match
 
     def parse(
@@ -404,11 +459,9 @@ class ParticleTrackingParser(MatchingParser):
         rel_mainfile = archive.metadata.mainfile or os.path.basename(mainfile)
         directory = os.path.dirname(mainfile)
         stem = recording_stem(mainfile)
+        files = find_recording_files(directory, stem, read_recording_id(mainfile))
         entry = build_particle_tracking_entry(
-            directory,
-            os.path.dirname(rel_mainfile),
-            stem,
-            find_recording_files(directory, stem),
+            directory, os.path.dirname(rel_mainfile), stem, files
         )
         link_AGE_samples(entry, chip_ids_from_filename(mainfile), archive, logger)
         store_entry(entry, archive, f'{rel_mainfile}.archive.yaml', logger)

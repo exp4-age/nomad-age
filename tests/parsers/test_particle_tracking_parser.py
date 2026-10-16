@@ -40,14 +40,21 @@ CAMERA_ATTRS = {
     'InfoFieldFrameCounterEnable': np.True_,
     'timestamp': '20260415144348',
 }
+ID_A = '0d1f3c6a-5b9e-4c2d-8e7f-a1b2c3d4e5f6'
+ID_B = '7e8f9a0b-1c2d-4e3f-9a4b-5c6d7e8f9a0b'
 
 
-def write_video(path):
+def recording(recording_id):
+    """Attributes of a recording saved since harvesters_pg writes recording ids."""
+    return {**CAMERA_ATTRS, 'recording_id': recording_id}
+
+
+def write_video(path, attrs=CAMERA_ATTRS):
     with h5py.File(path, 'w') as f:
         f.create_dataset('frames', data=np.zeros((3, 4, 6), dtype=np.uint8))
         f.create_dataset('timestamps', data=np.array([0.0, 0.01, 0.02]))
         f.create_dataset('frame_counters', data=np.arange(3, dtype=np.uint32))
-        for key, value in CAMERA_ATTRS.items():
+        for key, value in attrs.items():
             f.attrs.create(key, value)
 
 
@@ -81,11 +88,15 @@ def write_tracks(path, df, attrs):
             f.attrs[key] = value
 
 
-def write_filtered_tracks(path, df):
-    """Like tracking/filtering.py: index named frame, compressed, no attrs."""
+def write_filtered_tracks(path, df, attrs=None):
+    """Like tracking/filtering.py: index named frame, compressed, attrs of the
+    tracks (none in files filtered before its fix of line 41)."""
     df.set_index('frame', drop=False).to_hdf(
         path, key='trajs', mode='w', complevel=4, complib='zlib'
     )
+    with h5py.File(path, 'a') as f:
+        for key, value in (attrs or {}).items():
+            f.attrs[key] = value
 
 
 def write_focus_sweep(path):
@@ -120,6 +131,47 @@ def test_is_mainfile_prefers_unfiltered_tracks(tmp_path):
 
     (tmp_path / 'rec_trajs.h5').unlink()
     assert matches(parser, tmp_path / 'rec_filtered_trajs.h5')
+
+
+def test_recording_files_are_matched_by_recording_id(tmp_path):
+    tracks = make_tracks()
+    write_tracks(tmp_path / 'rec_trajs.h5', tracks, recording(ID_A))
+    # filtered before filtering.py copied attributes: linked by name
+    write_filtered_tracks(
+        tmp_path / 'rec_filtered_trajs.h5', tracks[tracks['particle'] < 2]
+    )
+    write_video(tmp_path / 'rec.h5', recording(ID_B))  # overwritten by another
+    write_video(tmp_path / 'renamed.h5', recording(ID_A))
+
+    assert find_recording_files(str(tmp_path), 'rec', ID_A) == {
+        'tracks': 'rec_trajs.h5',
+        'filtered_tracks': 'rec_filtered_trajs.h5',
+        'video': 'renamed.h5',
+    }
+
+
+def test_renamed_filtered_tracks_stay_with_their_tracks(tmp_path):
+    tracks = make_tracks()
+    filtered = tracks[tracks['particle'] < 2]
+    write_tracks(tmp_path / 'rec_trajs.h5', tracks, recording(ID_A))
+    write_filtered_tracks(
+        tmp_path / 'rec_short_filtered_trajs.h5', filtered, recording(ID_A)
+    )
+    parser = particle_tracking_parser_entry_point.load()
+
+    files = find_recording_files(str(tmp_path), 'rec', ID_A)
+    assert files['filtered_tracks'] == 'rec_short_filtered_trajs.h5'
+    assert not matches(parser, tmp_path / 'rec_short_filtered_trajs.h5')
+
+    # Tracked again under another name: the filtered tracks that pair up with
+    # the first tracks by name are not attributed to the second tracks.
+    (tmp_path / 'rec_short_filtered_trajs.h5').rename(
+        tmp_path / 'rec_filtered_trajs.h5'
+    )
+    write_tracks(tmp_path / 'rec_v2_trajs.h5', tracks, recording(ID_A))
+    files = find_recording_files(str(tmp_path), 'rec_v2', ID_A)
+    assert files['filtered_tracks'] is None
+    assert not matches(parser, tmp_path / 'rec_filtered_trajs.h5')
 
 
 def test_filtered_only_recording_takes_camera_settings_from_video(tmp_path):
@@ -272,7 +324,13 @@ def test_external_field_is_plotted_once_per_frame():
 def test_reprocessing_keeps_user_edits_and_refreshes_parsed_values():
     editable = user_editable_keys(AGE_ParticleTracking.m_def)
     assert {'illumination', 'pixel_size', 'datetime', 'samples'} <= editable
-    assert not editable & {'figures', 'n_particles', 'tracks_file', 'frame_rate'}
+    assert not editable & {
+        'figures',
+        'n_particles',
+        'tracks_file',
+        'frame_rate',
+        'lab_id',  # the recording id comes from the files
+    }
 
     fresh = {
         'figures': ['tracks', 'field'],
@@ -294,7 +352,7 @@ def test_reprocessing_keeps_user_edits_and_refreshes_parsed_values():
 
 
 def test_parse_writes_entry_yaml_that_round_trips(tmp_path):
-    write_tracks(tmp_path / 'rec_trajs.h5', make_tracks(), CAMERA_ATTRS)
+    write_tracks(tmp_path / 'rec_trajs.h5', make_tracks(), recording(ID_A))
     archive = EntryArchive(
         m_context=ClientContext(local_dir=str(tmp_path)),
         metadata=EntryMetadata(mainfile='rec_trajs.h5', upload_id='test_upload'),
@@ -317,12 +375,14 @@ def test_parse_writes_entry_yaml_that_round_trips(tmp_path):
     assert entry.n_particles == 3
     assert entry.n_localizations == 7
     assert entry.n_frames == 3
+    assert entry.lab_id == ID_A
     assert entry.camera_settings == {
         'fps': 100,
         'ExposureTime': 1000,
         'DeviceModelName': 'MC2066',
         'InfoFieldFrameCounterEnable': True,
         'timestamp': '20260415144348',
+        'recording_id': ID_A,
     }
     assert len(entry.figures) == 1
 

@@ -43,11 +43,27 @@ class AGE_ParticleTracking(AGE_ParticleMicroscopy, PlotSection, Measurement, Ent
         description='Particle trajectories tracked with trackpy in a microscope video.',
         a_eln=ELNAnnotation(
             properties=SectionProperties(
-                visible=Filter(exclude=['lab_id']),
                 editable=dict(
-                    exclude=['tracks_file', 'filtered_tracks_file', 'video_file']
+                    exclude=[
+                        'lab_id',
+                        'tracks_file',
+                        'filtered_tracks_file',
+                        'video_file',
+                    ]
                 ),
             )
+        ),
+    )
+
+    lab_id = Quantity(
+        type=str,
+        description=(
+            'Random id (attribute recording_id) that the acquisition software gives '
+            'each recording and the tracking scripts copy into the tracks. Empty '
+            'for older recordings.'
+        ),
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.StringEditQuantity, label='Recording ID'
         ),
     )
 
