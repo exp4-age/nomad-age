@@ -125,31 +125,26 @@ def merge_stored_values(fresh: dict, stored, editable: set) -> dict:
 
 
 def update_entry(entry, eid, archive, logger):
-    """`entry` merged with the stored entry `eid`, see merge_stored_values."""
-    from nomad import files
-    from nomad.search import search
+    """`entry` merged with the stored entry `eid` of the same upload, see
+    merge_stored_values.
 
-    query = {
-        'entry_id': eid,
-    }
-    search_result = search(
-        owner='all', query=query, user_id=archive.metadata.main_author.user_id
-    )
+    The stored archive is read directly, not via the search index: NOMAD 1.4.3
+    parses each file of a new upload twice, and on the second run the entry
+    written by the first one is often not searchable yet.
+    """
+    from nomad import files
+
     new_entry_dict = entry.m_to_dict()
-    res = search_result.data[0]
     try:
-        # Open Archives
-        with files.UploadFiles.get(upload_id=res['upload_id']).read_archive(
-            entry_id=res['entry_id']
-        ) as ar:
-            entry_id = res['entry_id']
-            entry_data = ar[entry_id]['data']
+        upload_files = files.UploadFiles.get(upload_id=archive.metadata.upload_id)
+        with upload_files.read_archive(entry_id=eid) as ar:
+            entry_data = ar[eid]['data']
             entry_data.pop('m_def', None)
             new_entry_dict = merge_stored_values(
                 new_entry_dict, entry_data, user_editable_keys(type(entry).m_def)
             )
     except Exception as e:
-        logger.error('Error in processing data: ', e)
+        logger.error(f'Stored entry {eid} could not be merged: {e!r}')
     return type(entry).m_from_dict(new_entry_dict)
 
 
