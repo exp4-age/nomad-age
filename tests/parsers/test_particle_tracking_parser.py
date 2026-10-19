@@ -1,13 +1,11 @@
 import base64
+import hashlib
 import io
 import logging
-import sys
-import types
+import os
 from datetime import datetime, timezone
-from types import SimpleNamespace
 
 import h5py
-import nomad
 import numpy as np
 import pandas as pd
 import pytest
@@ -24,6 +22,7 @@ from nomad_age.parsers import (
 )
 from nomad_age.parsers.particle_tracking_parser import (
     MAX_PREVIEW_WIDTH,
+    FocusSweepParser,
     ParticleTrackingParser,
     ParticleTransportVideoParser,
     build_particle_tracking_entry,
@@ -342,30 +341,8 @@ def old_tracks_entry() -> dict:
     return entry
 
 
-def stored_archives(monkeypatch, entries: dict) -> None:
-    """Stand-in for nomad.files: the processed archives of the upload, by entry id."""
-
-    class StoredArchive:
-        def __init__(self, entry_id):
-            self.entry_id = entry_id
-
-        def __enter__(self):
-            return {self.entry_id: {'data': dict(entries[self.entry_id])}}
-
-        def __exit__(self, *exc):
-            return False
-
-    upload_files = SimpleNamespace(
-        read_archive=lambda entry_id: StoredArchive(entry_id)
-    )
-    files = types.ModuleType('nomad.files')
-    files.UploadFiles = SimpleNamespace(get=lambda upload_id: upload_files)
-    monkeypatch.setitem(sys.modules, 'nomad.files', files)
-    monkeypatch.setattr(nomad, 'files', files, raising=False)
-
-
 def test_reprocessing_rewrites_old_tracks_entries_without_filtered_values(
-    tmp_path, monkeypatch, caplog
+    tmp_path, stored_archives, caplog
 ):
     tracks = make_tracks()
     write_tracks(tmp_path / 'rec_trajs.h5', tracks, recording(ID_A))
@@ -381,7 +358,7 @@ def test_reprocessing_rewrites_old_tracks_entries_without_filtered_values(
         yaml.dump({'data': old}, f)
     # the processed archive of the old entry file, as written by older versions
     eid = get_entry_id('test_upload', 'rec_trajs.h5.archive.yaml')
-    stored_archives(monkeypatch, {eid: old})
+    stored_archives({eid: old})
 
     data = parse(ParticleTrackingParser(), tmp_path, 'rec_trajs.h5')
 
@@ -396,9 +373,11 @@ def test_reprocessing_rewrites_old_tracks_entries_without_filtered_values(
     assert data['pixel_size'] == 0.345
     assert lab_ids(data['samples']) == ['2023_0418']
     assert data['name'] == 'rec'
+    # older versions wrote no link to the raw file entry
+    assert data['raw_file'] == get_hash_ref('test_upload', 'rec_trajs.h5')
 
 
-def test_entry_files_do_not_store_values_from_samples(tmp_path, monkeypatch):
+def test_entry_files_do_not_store_values_from_samples(tmp_path, stored_archives):
     write_video(tmp_path / 'rec.h5', recording(ID_A))
     written = parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
     entry_file = tmp_path / 'rec.h5.archive.yaml'
@@ -411,7 +390,7 @@ def test_entry_files_do_not_store_values_from_samples(tmp_path, monkeypatch):
         'spacer_thickness': 3369.25,
     }
     eid = get_entry_id('test_upload', 'rec.h5.archive.yaml')
-    stored_archives(monkeypatch, {eid: processed})
+    stored_archives({eid: processed})
 
     parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
 
@@ -550,6 +529,7 @@ def test_reprocessing_keeps_user_edits_and_refreshes_parsed_values():
         'video_file',
         'n_frames',
         'figures',
+        'raw_file',
     }
     assert {'illumination', 'pixel_size', 'datetime', 'samples'} <= editable
     assert not editable & {
@@ -558,6 +538,7 @@ def test_reprocessing_keeps_user_edits_and_refreshes_parsed_values():
         'tracks_file',
         'frame_rate',
         'lab_id',  # the recording id comes from the files
+        'raw_file',
     }
 
     fresh = {
@@ -749,7 +730,9 @@ def test_video_entry_passes_its_samples_and_instruments_to_its_tracks(tmp_path):
     write_tracks(tmp_path / 'rec_trajs.h5', make_tracks(), recording(ID_A))
     write_tracks(tmp_path / 'other_trajs.h5', make_tracks(), recording(ID_B))
     rec = parse(ParticleTrackingParser(), tmp_path, 'rec_trajs.h5')
-    # written by an older version; particles as a save in the GUI writes them
+    # written by an older version, without raw_file; particles as a save in the
+    # GUI writes them
+    del rec['raw_file']
     rec.update(
         filtered_tracks_file='rec_filtered_trajs.h5',
         n_particles_filtered=2,
@@ -781,6 +764,102 @@ def test_video_entry_passes_its_samples_and_instruments_to_its_tracks(tmp_path):
     assert lab_ids(tracks['instruments']) == ['OBJ-20x']
     assert tracks['n_particles'] == 3
     assert tracks['video'] == get_hash_ref('test_upload', 'renamed.h5.archive.yaml')
+    assert tracks['raw_file'] == get_hash_ref('test_upload', 'rec_trajs.h5')
     assert not tracks.keys() & (FILTERED_KEYS | {'particles'})
     with open(tmp_path / 'other_trajs.h5.archive.yaml') as f:
         assert yaml.safe_load(f)['data'] == other
+
+
+def parse_raw_file(parser, tmp_path, mainfile):
+    """Parse `mainfile` of an upload in `tmp_path`; its normalized AGE_RawFile."""
+    archive = EntryArchive(
+        m_context=ClientContext(local_dir=str(tmp_path)),
+        metadata=EntryMetadata(mainfile=mainfile, upload_id='test_upload'),
+    )
+    logger = logging.getLogger(__name__)
+    parser.parse(str(tmp_path / mainfile), archive, logger)
+    archive.data.normalize(archive, logger)
+    return archive
+
+
+@pytest.mark.parametrize(
+    'parser, mainfile, write, file_type',
+    [
+        (
+            ParticleTransportVideoParser(),
+            'day1/rec.h5',
+            lambda path: write_video(path, recording(ID_A)),
+            'particle transport video',
+        ),
+        (
+            ParticleTrackingParser(),
+            'day1/rec_trajs.h5',
+            lambda path: write_tracks(path, make_tracks(), recording(ID_A)),
+            'trajectories',
+        ),
+        (
+            ParticleTrackingParser(),
+            'day1/rec_filtered_trajs.h5',
+            lambda path: write_filtered_tracks(path, make_tracks(), recording(ID_A)),
+            'filtered trajectories',
+        ),
+        (
+            FocusSweepParser(),
+            'day1/20250227110207_focus_sweep.h5',
+            write_focus_sweep,
+            'focus sweep',
+        ),
+    ],
+)
+def test_raw_file_entry_fingerprints_the_file(
+    tmp_path, process_entry, entry_references, parser, mainfile, write, file_type
+):
+    path = tmp_path / mainfile
+    path.parent.mkdir()
+    write(path)
+    os.utime(path, (0, 1700000000.25))
+
+    archive = parse_raw_file(parser, tmp_path, mainfile)
+
+    raw = archive.data
+    assert isinstance(raw, AGE_RawFile)
+    assert raw.file_name == mainfile
+    assert raw.file_type == file_type
+    assert raw.file_size.to('byte').magnitude == path.stat().st_size
+    assert raw.sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert raw.modified == datetime(2023, 11, 14, 22, 13, 20, 250000, timezone.utc)
+    assert raw.name == archive.metadata.entry_name == os.path.basename(mainfile)
+    assert raw.m_to_dict()['processed_archive'] == get_hash_ref(
+        'test_upload', f'{mainfile}.archive.yaml'
+    )
+    # the entry file links back; NOMAD lists the link under the references
+    entry = process_entry(tmp_path, f'{mainfile}.archive.yaml')
+    raw_id = get_entry_id('test_upload', mainfile)
+    assert ('data.raw_file', raw_id) in entry_references(entry)
+
+
+def test_old_entry_gains_raw_file_once_and_keeps_user_edits(tmp_path, stored_archives):
+    write_video(tmp_path / 'rec.h5', recording(ID_A))
+    entry_file = tmp_path / 'rec.h5.archive.yaml'
+    eid = get_entry_id('test_upload', 'rec.h5.archive.yaml')
+    old = parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+    # as older versions wrote it, then edited in the GUI
+    del old['raw_file']
+    old['description'] = 'Field ramp at 1 Hz'
+    with open(entry_file, 'w') as f:
+        yaml.dump({'data': old}, f)
+    stored_archives({eid: old})
+
+    migrated = parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+
+    assert migrated['raw_file'] == get_hash_ref('test_upload', 'rec.h5')
+    assert migrated['description'] == 'Field ramp at 1 Hz'
+    assert migrated == {**old, 'raw_file': migrated['raw_file']}
+
+    # the next reprocessing finds the entry file up to date and leaves it alone
+    text = entry_file.read_text()
+    mtime = entry_file.stat().st_mtime_ns
+    stored_archives({eid: migrated})
+    parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+    assert entry_file.read_text() == text
+    assert entry_file.stat().st_mtime_ns == mtime

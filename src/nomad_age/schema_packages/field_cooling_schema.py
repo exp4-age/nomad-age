@@ -13,6 +13,8 @@ from nomad.datamodel.metainfo.plot import PlotSection
 from nomad.datamodel.metainfo.workflow import Link
 from nomad.metainfo import Quantity, SchemaPackage, Section
 
+from nomad_age.schema_packages.age_schema import AGE_FromRawFile
+
 configuration = config.get_plugin_entry_point(
     'nomad_age.schema_packages:field_cooling_schema_entry_point'
 )
@@ -20,7 +22,7 @@ configuration = config.get_plugin_entry_point(
 m_package = SchemaPackage(name='field_cooling_schema')
 
 
-class AGE_FieldCooling(PlotSection, Process, EntryData):
+class AGE_FieldCooling(PlotSection, AGE_FromRawFile, Process, EntryData):
     m_def = Section(
         label='Field Cooling',
         description='A Field Cooling process.',

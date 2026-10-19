@@ -1,7 +1,9 @@
 import logging
 import sys
 import types
+from types import SimpleNamespace
 
+import nomad
 import pytest
 from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.datamodel.context import ClientContext
@@ -60,6 +62,33 @@ def entry_references():
         }
 
     return references
+
+
+@pytest.fixture
+def stored_archives(monkeypatch):
+    """Stand-in for nomad.files: store(entries) makes `entries`, a dict by entry id,
+    the data of the processed archives of the upload."""
+
+    def store(entries: dict) -> None:
+        class StoredArchive:
+            def __init__(self, entry_id):
+                self.entry_id = entry_id
+
+            def __enter__(self):
+                return {self.entry_id: {'data': dict(entries[self.entry_id])}}
+
+            def __exit__(self, *exc):
+                return False
+
+        upload_files = SimpleNamespace(
+            read_archive=lambda entry_id: StoredArchive(entry_id)
+        )
+        files = types.ModuleType('nomad.files')
+        files.UploadFiles = SimpleNamespace(get=lambda upload_id: upload_files)
+        monkeypatch.setitem(sys.modules, 'nomad.files', files)
+        monkeypatch.setattr(nomad, 'files', files, raising=False)
+
+    return store
 
 
 class StoredArchivesContext(ClientContext):

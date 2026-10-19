@@ -16,6 +16,7 @@ from nomad_age.schema_packages.age_schema import (
     AGE_Sample_Reference,
 )
 from nomad_age.schema_packages.field_cooling_schema import AGE_FieldCooling
+from nomad_age.utils.fingerprint import file_fingerprint
 from nomad_age.utils.utils import (
     create_archive,
     find_existing_AGE_sample,
@@ -217,8 +218,14 @@ class FieldCoolingParser(MatchingParser):
             else:
                 raise ValueError('Two samples have the same ID. Something went wrong')
 
-        raw_file = AGE_RawFile(processed_archive=get_hash_ref(uid, entry_file_name))
-        archive.data = raw_file
+        rel_mainfile = archive.metadata.mainfile or os.path.basename(mainfile)
+        archive.data = AGE_RawFile(
+            file_name=rel_mainfile,
+            file_type='field cooling log',
+            processed_archive=get_hash_ref(uid, entry_file_name),
+            **file_fingerprint(mainfile),
+        )
+        entry.raw_file = get_hash_ref(uid, rel_mainfile)
         new_entry_created = create_archive(entry, archive, entry_file_name)
         if not new_entry_created:
             new_entry = update_entry(entry, eid, archive, logger)
