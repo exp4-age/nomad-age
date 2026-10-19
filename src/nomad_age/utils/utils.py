@@ -1,9 +1,17 @@
+import json
 import math
 from datetime import datetime, timezone
+from typing import Optional
 from zoneinfo import ZoneInfo
 
+import yaml
 from nomad.datamodel.data import ArchiveSection
 from nomad.utils import hash
+
+# libyaml is much faster than pure Python on large entries; NOMAD reads the files
+# with a safe loader, so write them with a safe dumper.
+YAML_LOADER = getattr(yaml, 'CSafeLoader', yaml.SafeLoader)
+YAML_DUMPER = getattr(yaml, 'CSafeDumper', yaml.SafeDumper)
 
 # Lab software (camera, field cooling) writes wall-clock times without a zone.
 LAB_TIMEZONE = ZoneInfo('Europe/Berlin')
@@ -64,21 +72,70 @@ def dict_nan_equal(dict1, dict2):
     return True
 
 
-def create_archive(entity, archive, file_name, *, overwrite: bool = False):
-    import json
+def dump_archive(data, file_type: str) -> Optional[str]:
+    """`data` as JSON (file_type 'json') or YAML text; None if JSON or safe YAML
+    cannot represent it."""
+    try:
+        if file_type == 'json':
+            return json.dumps(data)
+        return yaml.dump(data, Dumper=YAML_DUMPER)
+    except (TypeError, ValueError, yaml.YAMLError):
+        return None
 
-    import yaml
 
-    if not archive.m_context.raw_path_exists(file_name) or overwrite:
-        entity_entry = entity.m_to_dict(with_root_def=True)
-        with archive.m_context.raw_file(file_name, 'w') as outfile:
-            if file_name.endswith('.yaml'):
-                yaml.dump({'data': entity_entry}, outfile)
-            elif file_name.endswith('.json'):
-                json.dump({'data': entity_entry}, outfile)
-        archive.m_context.process_updated_raw_file(file_name, allow_modify=overwrite)
+def load_archive(text: str, file_type: str):
+    if file_type == 'json':
+        return json.loads(text)
+    return yaml.load(text, Loader=YAML_LOADER)
+
+
+def archive_file_holds(context, file_name: str, data, text, file_type: str) -> bool:
+    """Whether the existing raw file `file_name` holds `data`; `text` is
+    dump_archive(data, file_type).
+
+    Compared after a round trip through `text`, so that e.g. tuples equal lists
+    and NaN equals NaN.
+    """
+    with context.raw_file(file_name, 'r') as f:
+        stored_text = f.read()
+    if stored_text == text:
         return True
-    return False
+    try:
+        stored = load_archive(stored_text, file_type)
+        new = data if text is None else load_archive(text, file_type)
+    except (ValueError, yaml.YAMLError):
+        return False
+    return nan_equal(stored, new)
+
+
+def write_archive_file(context, file_name: str, data, text, file_type: str) -> None:
+    """Write `data` with its dump_archive `text`; without text (types that safe
+    YAML cannot represent) as before, with the full YAML dumper."""
+    with context.raw_file(file_name, 'w') as f:
+        if text is not None:
+            f.write(text)
+        elif file_type == 'json':
+            json.dump(data, f)
+        else:
+            yaml.dump(data, f)
+
+
+def create_archive(entity, archive, file_name, *, overwrite: bool = False) -> bool:
+    """Write `entity` as entry file `file_name` and process it; an existing file
+    only with `overwrite` and only if its content changes, as NOMAD processes the
+    file again on every write. True if the file was written."""
+    context = archive.m_context
+    exists = context.raw_path_exists(file_name)
+    if exists and not overwrite:
+        return False
+    data = {'data': entity.m_to_dict(with_root_def=True)}
+    file_type = 'json' if file_name.endswith('.json') else 'yaml'
+    text = dump_archive(data, file_type)
+    if exists and archive_file_holds(context, file_name, data, text, file_type):
+        return False
+    write_archive_file(context, file_name, data, text, file_type)
+    context.process_updated_raw_file(file_name, allow_modify=overwrite)
+    return True
 
 
 def user_editable_keys(section_def) -> set:
