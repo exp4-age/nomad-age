@@ -13,8 +13,21 @@ from nomad.datamodel.metainfo.basesections import (
     SectionReference,
 )
 from nomad.datamodel.metainfo.plot import PlotSection
-from nomad.metainfo import JSON, MEnum, Quantity, SchemaPackage, Section
+from nomad.metainfo import (
+    JSON,
+    MEnum,
+    Quantity,
+    SchemaPackage,
+    Section,
+    SubSection,
+)
 
+from nomad_age.schema_packages.age_schema import (
+    AGE_CoatedSample,
+    AGE_Particles,
+    AGE_Sample,
+    resolved,
+)
 from nomad_age.utils.utils import get_hash_ref
 
 m_package = SchemaPackage(name='particle_tracking_schema')
@@ -45,7 +58,133 @@ class AGE_ParticleMicroscopy(ArchiveSection):
     )
 
 
-class AGE_ParticleTransport(AGE_ParticleMicroscopy, PlotSection, Measurement):
+class AGE_SampleName(ArchiveSection):
+    """A sample of a measurement, by name."""
+
+    name = Quantity(
+        type=str,
+        description='Name of the linked entry, or the lab_id of the sample.',
+    )
+
+
+class AGE_Measurement(Measurement):
+    """A measurement whose samples are also listed by kind.
+
+    A sample reference does not tell the search index what kind of entry it
+    links, so particles and chips are listed apart for the search apps to filter
+    by, and the spacer thickness of a coated chip is taken over. Particles and
+    chips are sub-sections, as NOMAD 1.4.3 makes search quantities of scalar
+    quantities only.
+    """
+
+    particles = SubSection(
+        section_def=AGE_SampleName,
+        repeats=True,
+        description=(
+            'The particle batches (Particles entries) among the samples. Filled '
+            'from samples during processing; edit samples instead.'
+        ),
+    )
+
+    chips = SubSection(
+        section_def=AGE_SampleName,
+        repeats=True,
+        description=(
+            'The chips among the samples: AGE Sample entries and the chips of '
+            'Coated chip entries. Filled from samples during processing; edit '
+            'samples instead.'
+        ),
+    )
+
+    spacer_thickness = Quantity(
+        type=float,
+        unit='nm',
+        description=(
+            'Spacer layer thickness of the coated chip among the samples (the first '
+            'one, if several). Filled from samples during processing; edit samples '
+            'or the Coated chip entry instead.'
+        ),
+        a_display={'unit': 'nm'},
+    )
+
+    def normalize(self, archive, logger):
+        super().normalize(archive, logger)
+        self.list_samples_by_kind(logger)
+
+    def list_samples_by_kind(self, logger) -> None:
+        """Fill particles, chips and spacer_thickness from the entries that
+        samples reference.
+
+        NOMAD normalizes sub-sections before their parent, so the samples have
+        found the reference of their lab_id by now. Samples whose entry cannot be
+        loaded are left out with a warning.
+        """
+        particles, chips, thicknesses = [], [], []
+        for sample in self.samples:
+            sample_id = sample.lab_id or sample.name
+            try:
+                target = resolved(sample.reference)  # loads the linked entry
+            except Exception as e:
+                logger.warning(
+                    f'Sample {sample_id} not listed: entry not loaded: {e!r}'
+                )
+                continue
+            if target is None:
+                logger.warning(f'Sample {sample_id} not listed: it links no entry')
+                continue
+            if isinstance(target, AGE_Particles):
+                particles.append(target.name or sample.lab_id)
+            elif isinstance(target, AGE_Sample):
+                chips.append(target.name or sample.lab_id)
+            elif isinstance(target, AGE_CoatedSample):
+                chips.append(coated_chip_name(target, sample_id, logger))
+                thickness = target.spacer_thickness
+                if thickness is not None:
+                    thicknesses.append((sample_id, thickness.to('nm').magnitude))
+        self.particles = [AGE_SampleName(name=n) for n in unique(particles)]
+        self.chips = [AGE_SampleName(name=n) for n in unique(chips)]
+        self.spacer_thickness = thicknesses[0][1] if thicknesses else None
+        if len({thickness for _, thickness in thicknesses}) > 1:
+            listed = ', '.join(f'{i}: {t:g} nm' for i, t in thicknesses)
+            logger.warning(
+                f'Samples have different spacer thicknesses ({listed}); '
+                f'spacer_thickness is the one of {thicknesses[0][0]}'
+            )
+
+
+def coated_chip_name(coated_sample, sample_id, logger) -> str:
+    """Name of the chip of a coated chip; its lab_id if the chip cannot be
+    loaded."""
+    try:
+        chip = resolved(coated_sample.chip)
+    except Exception as e:
+        chip = None
+        problem = f'entry not loaded: {e!r}'
+    else:
+        problem = 'it links no chip'
+    if chip is None:
+        logger.warning(
+            f'Chip of sample {sample_id} not listed by its name: {problem}; '
+            'listed by the lab_id of the coated chip'
+        )
+        return coated_sample.lab_id or sample_id
+    return chip.name or chip.lab_id
+
+
+def unique(names) -> list:
+    """The names without empty and repeated ones, in order."""
+    return [name for name in dict.fromkeys(names) if name]
+
+
+# Normalizer output of AGE_Measurement, which the entry files do not store.
+FROM_SAMPLES = tuple(
+    name
+    for name in AGE_Measurement.m_def.all_properties
+    if name not in Measurement.m_def.all_properties
+)
+
+
+class AGE_ParticleTransport(AGE_ParticleMicroscopy, PlotSection, AGE_Measurement):
     """A particle transport experiment: its camera video and the tracks made from
     it share these quantities, above all the recording id."""
 
@@ -114,7 +253,7 @@ class AGE_ParticleTransportVideo(AGE_ParticleTransport, EntryData):
         ),
         a_eln=ELNAnnotation(
             properties=SectionProperties(
-                editable=dict(exclude=['lab_id', 'video_file']),
+                editable=dict(exclude=['lab_id', 'video_file', *FROM_SAMPLES]),
             )
         ),
     )
@@ -160,7 +299,9 @@ class AGE_ParticleTracking(AGE_ParticleTransport, EntryData):
         ),
         a_eln=ELNAnnotation(
             properties=SectionProperties(
-                editable=dict(exclude=['lab_id', 'tracks_file', 'video_file']),
+                editable=dict(
+                    exclude=['lab_id', 'tracks_file', 'video_file', *FROM_SAMPLES]
+                ),
             )
         ),
     )
@@ -294,7 +435,7 @@ class AGE_TrajectoryFiltering(Analysis, EntryData):
             )
 
 
-class AGE_FocusSweep(AGE_ParticleMicroscopy, PlotSection, Measurement, EntryData):
+class AGE_FocusSweep(AGE_ParticleMicroscopy, PlotSection, AGE_Measurement, EntryData):
     m_def = Section(
         label='Focus Sweep',
         description=(
@@ -304,7 +445,7 @@ class AGE_FocusSweep(AGE_ParticleMicroscopy, PlotSection, Measurement, EntryData
         a_eln=ELNAnnotation(
             properties=SectionProperties(
                 visible=Filter(exclude=['lab_id']),
-                editable=dict(exclude=['data_file']),
+                editable=dict(exclude=['data_file', *FROM_SAMPLES]),
             )
         ),
     )

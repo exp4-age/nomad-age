@@ -21,6 +21,7 @@ from PIL import Image
 
 from nomad_age.schema_packages.age_schema import AGE_RawFile, AGE_Sample
 from nomad_age.schema_packages.particle_tracking_schema import (
+    FROM_SAMPLES,
     AGE_FocusSweep,
     AGE_ParticleTracking,
     AGE_ParticleTransportVideo,
@@ -606,10 +607,15 @@ def share_with_tracks(video, archive: EntryArchive, logger) -> None:
         ):
             continue
         data.update(shared)
-        # e.g. the filtered counts that older versions wrote
+        # e.g. the filtered counts that older versions wrote, or particles, chips
+        # and spacer thickness that a save in the GUI wrote
         defined = AGE_ParticleTracking.m_def.all_properties
         tracks = AGE_ParticleTracking.m_from_dict(
-            {key: value for key, value in data.items() if key in defined}
+            {
+                key: value
+                for key, value in data.items()
+                if key in defined and key not in FROM_SAMPLES
+            }
         )
         create_archive(tracks, archive, entry_file, overwrite=True)
         logger.info(f'Samples, instruments and video of {name} taken from {video_name}')
@@ -625,13 +631,15 @@ def store_entry(
 ) -> None:
     """Write `entry` as YAML entry; on reprocessing, stored values that users may
     edit win, except for the keys in `parsed_wins`; stored values of the keys in
-    `parser_owned` are dropped."""
+    `parser_owned` and of FROM_SAMPLES, which the stored archive holds as
+    normalizer output, are dropped."""
     upload_id = archive.metadata.upload_id
     archive.data = AGE_RawFile(
         processed_archive=get_hash_ref(upload_id, entry_file_name)
     )
     if not create_archive(entry, archive, entry_file_name):
         eid = get_entry_id(upload_id, entry_file_name)
+        parser_owned = (*parser_owned, *FROM_SAMPLES)
         merged = update_entry(entry, eid, archive, logger, parsed_wins, parser_owned)
         create_archive(merged, archive, entry_file_name, overwrite=True)
 

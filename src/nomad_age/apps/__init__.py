@@ -40,6 +40,8 @@ app_entry_point = AppEntryPoint(
 )
 
 sample_schema = 'nomad_age.schema_packages.age_schema.AGE_Sample'
+coated_sample_schema = 'nomad_age.schema_packages.age_schema.AGE_CoatedSample'
+spin_coating_schema = 'nomad_age.schema_packages.age_schema.AGE_SpinCoating'
 base_entity_schema = 'nomad.datamodel.metainfo.basesections.v1.BaseSection'
 age_samples = AppEntryPoint(
     name='age_samples',
@@ -49,12 +51,29 @@ age_samples = AppEntryPoint(
         path='age_samples',
         category='Experiment',
         description='AGE samples database, used to find all our samples',
-        search_quantities=SearchQuantities(
-            include=[f'*#{sample_schema}', f'*#{base_entity_schema}']
+        readme=(
+            'Chips (AGE Sample), their coated states (Coated chip: one spacer '
+            'layer, e.g. PMMA, with its thickness) and the spin coatings that '
+            'made them. Filter by type to see only one of them.'
         ),
-        filters_locked={'section_defs.definition_qualified_name': [sample_schema]},
+        search_quantities=SearchQuantities(
+            include=[
+                f'*#{sample_schema}',
+                f'*#{coated_sample_schema}',
+                f'*#{spin_coating_schema}',
+                f'*#{base_entity_schema}',
+                'entry_type',
+            ]
+        ),
+        filters_locked={
+            'section_defs.definition_qualified_name': [
+                sample_schema,
+                coated_sample_schema,
+                spin_coating_schema,
+            ]
+        },
         columns=Columns(
-            selected=['lab_id', 'state', 'entry_type'],
+            selected=['lab_id', 'state', 'entry_type', 'spacer_thickness'],
             options={
                 'entry_type': Column(quantity='entry_type', label='Type'),
                 'lab_id': Column(
@@ -62,6 +81,16 @@ age_samples = AppEntryPoint(
                 ),
                 'state': Column(
                     quantity=f'data.state#{sample_schema}', label='Sample state'
+                ),
+                'spacer_material': Column(
+                    search_quantity=f'data.spacer_material#{coated_sample_schema}',
+                    title='Spacer material',
+                ),
+                'spacer_thickness': Column(
+                    search_quantity=f'data.spacer_thickness#{coated_sample_schema}',
+                    title='Spacer thickness',
+                    unit='nm',
+                    format=Format(decimals=0, mode='standard'),
                 ),
             },
         ),
@@ -76,6 +105,18 @@ age_samples = AppEntryPoint(
                 ),
                 MenuItemTerms(
                     quantity=f'data.location#{sample_schema}',
+                ),
+                MenuItemTerms(search_quantity='entry_type', title='Type'),
+                MenuItemTerms(
+                    search_quantity=f'data.spacer_material#{coated_sample_schema}',
+                    title='Spacer material',
+                ),
+                MenuItemHistogram(
+                    x=Axis(
+                        search_quantity=f'data.spacer_thickness#{coated_sample_schema}',
+                        unit='nm',
+                    ),
+                    title='Spacer thickness',
                 ),
             ],
         ),
@@ -188,6 +229,16 @@ def particle_transport_app(
                 search_quantity=q('samples[*].lab_id'), title='Samples', selected=True
             ),
             Column(
+                search_quantity=q('particles[*].name'), title='Particles', selected=True
+            ),
+            Column(search_quantity=q('chips[*].name'), title='Chips'),
+            Column(
+                search_quantity=q('spacer_thickness'),
+                title='Spacer thickness',
+                unit='nm',
+                format=Format(decimals=0, mode='standard'),
+            ),
+            Column(
                 search_quantity=q('instruments[*].lab_id'),
                 title='Instruments',
                 selected=True,
@@ -230,6 +281,14 @@ def particle_transport_app(
                 Menu(
                     title='Samples',
                     items=[
+                        MenuItemTerms(
+                            search_quantity=q('particles.name'), title='Particles'
+                        ),
+                        MenuItemTerms(search_quantity=q('chips.name'), title='Chips'),
+                        MenuItemHistogram(
+                            x=Axis(search_quantity=q('spacer_thickness'), unit='nm'),
+                            title='Spacer thickness',
+                        ),
                         MenuItemTerms(
                             search_quantity=q('samples.lab_id'), title='Sample ID'
                         ),
@@ -344,11 +403,13 @@ particle_tracking = AppEntryPoint(
         description='Find particle tracking measurements by sample, objective and '
         'camera settings',
         readme=(
-            'Particle tracking measurements of the AGE lab. Chips and particle '
-            'batches are the samples of a measurement, objectives its instruments: '
-            'filter by their IDs to find all recordings of a chip or particle '
-            'batch. Particle and localization counts are read from the unfiltered '
-            'tracks file; the filter of an upload is documented in its Trajectory '
+            'Particle tracking measurements of the AGE lab. Chips (or coated chips) '
+            'and particle batches are the samples of a measurement, objectives its '
+            'instruments: filter by particles, chips or sample IDs to find all '
+            'recordings of a chip or particle batch, and by spacer thickness for '
+            'recordings on a coated chip, whose chip is listed under chips. '
+            'Particle and localization counts are read from the unfiltered tracks '
+            'file; the filter of an upload is documented in its Trajectory '
             'filtering entry. The recording ID is the random id that the '
             'acquisition software gives each recording; video and tracks carry it.'
         ),
@@ -356,7 +417,7 @@ particle_tracking = AppEntryPoint(
         columns=[
             Column(
                 search_quantity=tracking('n_particles'),
-                title='Particles',
+                title='Tracked particles',
                 format=count,
                 selected=True,
             ),
@@ -381,10 +442,12 @@ particle_transport_videos = AppEntryPoint(
         readme=(
             'Camera videos of particle transport experiments, as saved by '
             'harvesters_pg; each entry shows the camera settings and the first '
-            'frame. Chips and particle batches are the samples, objectives the '
-            'instruments. The recording ID is the random id that the acquisition '
-            'software gives each recording: the tracks made from a video carry the '
-            'same one, so filtering by it in Particle Tracking finds them.'
+            'frame. Chips (or coated chips) and particle batches are the samples, '
+            'objectives the instruments; filter by particles, chips or the spacer '
+            'thickness of a coated chip. The recording ID is the '
+            'random id that the acquisition software gives each recording: the '
+            'tracks made from a video carry the same one, so filtering by it in '
+            'Particle Tracking finds them.'
         ),
         menu_title='Particle transport videos',
         columns=[
