@@ -1,11 +1,14 @@
 from nomad.config.models.plugins import SchemaPackageEntryPoint
 from pydantic import Field
 
+from nomad_age.utils.entry_hash import install as install_entry_hash
+
 
 class AGESchemaEntryPoint(SchemaPackageEntryPoint):
     parameter: int = Field(0, description='Custom configuration parameter')
 
     def load(self):
+        install_entry_hash()
         from nomad_age.schema_packages.age_schema import m_package
 
         return m_package  # Package with AGE wide schemata
@@ -21,6 +24,7 @@ class LMOKEandVMOKESchemaEntryPoint(SchemaPackageEntryPoint):
     parameter: int = Field(0, description='Custom configuration parameter')
 
     def load(self):
+        install_entry_hash()
         from nomad_age.schema_packages.LMOKEandVMOKESchema import lmoke_vmoke_package
 
         return lmoke_vmoke_package  # Package with LMOKE and VMOKE schemata
@@ -36,6 +40,7 @@ class FieldCoolingSchemaEntryPoint(SchemaPackageEntryPoint):
     parameter: int = Field(0, description='Custom configuration parameter')
 
     def load(self):
+        install_entry_hash()
         from nomad_age.schema_packages.field_cooling_schema import m_package
 
         return m_package  # Package with Field Cooling schemata
@@ -51,6 +56,7 @@ class ParticleTrackingSchemaEntryPoint(SchemaPackageEntryPoint):
     parameter: int = Field(0, description='Custom configuration parameter')
 
     def load(self):
+        install_entry_hash()
         from nomad_age.schema_packages.particle_tracking_schema import m_package
 
         return m_package  # Package with particle tracking and focus sweep schemata
