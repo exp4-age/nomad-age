@@ -12,6 +12,7 @@ from nomad.config.models.ui import (
     Menu,
     MenuItemHistogram,
     MenuItemTerms,
+    MenuItemVisibility,
     Pagination,
     SearchQuantities,
     WidgetHistogram,
@@ -152,6 +153,150 @@ age_samples = AppEntryPoint(
                 },
             ]
         },
+    ),
+)
+
+age_schema = 'nomad_age.schema_packages.age_schema'
+particles_schema = f'{age_schema}.AGE_Particles'
+objective_schema = f'{age_schema}.AGE_Objective'
+# All inventory entry types (lab equipment and consumables). A new type, e.g.
+# cameras, magnets or chemicals, is added here only: the AGE Inventory app
+# includes and lists every type in this tuple. Its own quantities get a column or
+# menu item only where added explicitly below.
+INVENTORY_SCHEMAS = (particles_schema, objective_schema)
+
+
+def particles(path: str) -> str:
+    """Search quantity of a particle batch."""
+    return f'data.{path}#{particles_schema}'
+
+
+def objective(path: str) -> str:
+    """Search quantity of a microscope objective."""
+    return f'data.{path}#{objective_schema}'
+
+
+# name, lab_id and description are BaseSection quantities: NOMAD 1.4.3 registers
+# them under BaseSection as well, which finds them in every inventory type
+# (CompositeSystem- and Instrument-based alike).
+def base_entity(path: str) -> str:
+    """Search quantity of all inventory types."""
+    return f'data.{path}#{base_entity_schema}'
+
+
+age_inventory = AppEntryPoint(
+    name='age_inventory',
+    description='AGE inventory: lab equipment and consumables.',
+    app=App(
+        label='AGE Inventory',
+        path='age_inventory',
+        category='Experiment',
+        description='Find the particle batches and objectives of the AGE lab',
+        readme=(
+            'Inventory of the AGE lab: particle batches (Particles: particle '
+            'type, batch and batch date) and microscope objectives (Objective: '
+            'magnification and numerical aperture). Filter by type to see only '
+            'one of them. Recordings link particles under samples and objectives '
+            'under instruments. To see where an item was used, open it: '
+            "'Referenced by' in Entry References lists the recordings linking it."
+        ),
+        search_quantities=SearchQuantities(
+            include=[
+                *(f'*#{schema}' for schema in INVENTORY_SCHEMAS),
+                f'*#{base_entity_schema}',
+                'entry_type',
+                'authors.name',
+                'upload_name',
+                'datasets.dataset_name',
+            ]
+        ),
+        filters_locked={
+            'section_defs.definition_qualified_name': list(INVENTORY_SCHEMAS)
+        },
+        columns=[
+            Column(search_quantity='entry_type', title='Type', selected=True),
+            Column(search_quantity=base_entity('name'), title='Name', selected=True),
+            Column(search_quantity=base_entity('lab_id'), title='ID', selected=True),
+            Column(search_quantity=base_entity('description'), title='Description'),
+            Column(
+                search_quantity=particles('particle_type'),
+                title='Particle type',
+                selected=True,
+            ),
+            Column(search_quantity=particles('batch'), title='Batch', selected=True),
+            Column(
+                search_quantity=particles('batch_date'),
+                title='Batch date',
+                selected=True,
+            ),
+            Column(
+                search_quantity=objective('magnification'),
+                title='Magnification',
+                selected=True,
+            ),
+            Column(
+                search_quantity=objective('numerical_aperture'),
+                title='NA',
+                format=Format(decimals=2, mode='standard'),
+                selected=True,
+            ),
+            Column(search_quantity='entry_create_time', title='Created', selected=True),
+            Column(search_quantity='upload_create_time', title='Uploaded'),
+            Column(search_quantity='upload_name', title='Upload'),
+            Column(search_quantity='authors', title='Authors'),
+        ],
+        menu=Menu(
+            title='Inventory',
+            items=[
+                MenuItemTerms(search_quantity='entry_type', title='Type'),
+                MenuItemTerms(search_quantity=base_entity('name'), title='Name'),
+                MenuItemTerms(search_quantity=base_entity('lab_id'), title='ID'),
+                Menu(
+                    title='Particles',
+                    items=[
+                        MenuItemTerms(
+                            search_quantity=particles('particle_type'),
+                            title='Particle type',
+                        ),
+                        MenuItemTerms(
+                            search_quantity=particles('batch'), title='Batch'
+                        ),
+                        MenuItemHistogram(
+                            x=Axis(search_quantity=particles('batch_date')),
+                            title='Batch date',
+                        ),
+                    ],
+                ),
+                Menu(
+                    title='Objectives',
+                    # Histograms: NOMAD 1.4.3 has no terms aggregation for
+                    # float quantities of a schema.
+                    items=[
+                        MenuItemHistogram(
+                            x=Axis(search_quantity=objective('magnification')),
+                            title='Magnification',
+                        ),
+                        MenuItemHistogram(
+                            x=Axis(search_quantity=objective('numerical_aperture')),
+                            title='Numerical aperture',
+                        ),
+                    ],
+                ),
+                Menu(
+                    title='Author / Origin',
+                    items=[
+                        MenuItemTerms(search_quantity='authors.name'),
+                        MenuItemTerms(search_quantity='upload_name'),
+                        MenuItemTerms(search_quantity='datasets.dataset_name'),
+                        MenuItemHistogram(
+                            x=Axis(search_quantity='upload_create_time'),
+                            title='Uploaded',
+                        ),
+                        MenuItemVisibility(),
+                    ],
+                ),
+            ],
+        ),
     ),
 )
 
