@@ -11,10 +11,13 @@ from nomad.datamodel.metainfo.annotations import (
 from nomad.datamodel.metainfo.basesections import (
     Activity,
     CompositeSystem,
+    CompositeSystemReference,
     EntityReference,
     Instrument,
+    Process,
 )
-from nomad.metainfo import Datetime, MEnum, Quantity, SchemaPackage, Section
+from nomad.datamodel.metainfo.workflow import Link
+from nomad.metainfo import Datetime, MEnum, MProxy, Quantity, SchemaPackage, Section
 
 from nomad_age.utils.utils import get_referencing_entries
 
@@ -72,7 +75,10 @@ class AGE_Sample(CompositeSystem, EntryData):
         referencing = get_referencing_entries(self)
         if not referencing:
             return
-        used_methods = [entry['data']['method'] for entry in referencing]
+        # Coated chips and other samples that reference a chip have no method.
+        used_methods = [
+            (entry.get('data') or {}).get('method') for entry in referencing
+        ]
         if 'Helium Ion Bombardment' in used_methods:
             self.state = 'after IB'
         elif 'Field Cooling' in used_methods:
@@ -169,6 +175,246 @@ class AGE_Objective(Instrument, EntryData):
         description='Numerical aperture (NA).',
         a_eln=ELNAnnotation(component=ELNComponentEnum.NumberEditQuantity),
     )
+
+
+class AGE_CoatedSample(CompositeSystem, EntryData):
+    """A chip in one coated state: the chip with one spacer layer on it."""
+
+    m_def = Section(
+        label='Coated chip',
+        description=(
+            'A chip (AGE Sample) with a spacer layer, e.g. PMMA, spin coated on it. '
+            'Each layer is an entry of its own: once it is removed and a new one is '
+            'coated, the chip gets a new coated chip entry. Recordings link the '
+            'coated chip they were measured on under samples. Name its lab_id '
+            '<chip>_PMMA<n>, e.g. 2023_0418_PMMA2 for the second PMMA layer of '
+            'chip 2023_0418.'
+        ),
+        a_eln=ELNAnnotation(
+            properties=SectionProperties(
+                visible=Filter(exclude=['datetime']),
+                order=[
+                    'name',
+                    'lab_id',
+                    'chip',
+                    'spacer_material',
+                    'spacer_thickness',
+                    'spacer_thickness_uncertainty',
+                    'thickness_method',
+                    'n_thickness_points',
+                    'date_coated',
+                    'date_removed',
+                    'description',
+                ],
+            )
+        ),
+    )
+
+    chip = Quantity(
+        type=AGE_Sample,
+        description='The chip that the layer is coated on.',
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.ReferenceEditQuantity, label='Chip'
+        ),
+    )
+
+    spacer_material = Quantity(
+        type=str,
+        default='PMMA',
+        description='Material of the spacer layer, e.g. PMMA.',
+        a_eln=ELNAnnotation(component=ELNComponentEnum.StringEditQuantity),
+    )
+
+    spacer_thickness = Quantity(
+        type=float,
+        unit='nm',
+        description=(
+            'Thickness of the spacer layer: the mean over the points measured, e.g. '
+            'by profilometry on a scratch in the layer.'
+        ),
+        a_eln=ELNAnnotation(component=ELNComponentEnum.NumberEditQuantity),
+        a_display={'unit': 'nm'},
+    )
+
+    spacer_thickness_uncertainty = Quantity(
+        type=float,
+        unit='nm',
+        description=(
+            'Standard error of the mean of spacer_thickness over the profilometry '
+            'points.'
+        ),
+        a_eln=ELNAnnotation(component=ELNComponentEnum.NumberEditQuantity),
+        a_display={'unit': 'nm'},
+    )
+
+    thickness_method = Quantity(
+        type=MEnum(['profilometry (scratch)', 'other']),
+        description=(
+            'How spacer_thickness was measured; profilometry (scratch): profile '
+            'height of a scratch in the layer at several points.'
+        ),
+        a_eln=ELNAnnotation(component=ELNComponentEnum.EnumEditQuantity),
+    )
+
+    n_thickness_points = Quantity(
+        type=int,
+        description='Points that spacer_thickness is the mean of.',
+        a_eln=ELNAnnotation(component=ELNComponentEnum.NumberEditQuantity),
+    )
+
+    date_coated = Quantity(
+        type=Datetime,
+        description='Date the layer was spin coated.',
+        a_eln=ELNAnnotation(component=ELNComponentEnum.DateEditQuantity),
+    )
+
+    date_removed = Quantity(
+        type=Datetime,
+        description='Date the layer was removed; empty while it is on the chip.',
+        a_eln=ELNAnnotation(component=ELNComponentEnum.DateEditQuantity),
+    )
+
+
+def resolved(reference):
+    """The section that a reference quantity value links; loads its entry if
+    needed. Raises if the entry cannot be loaded."""
+    if isinstance(reference, MProxy):
+        return reference.m_proxy_resolve()
+    return reference
+
+
+class AGE_SpinCoating(Process, EntryData):
+    """Spin coating of a spacer layer on a chip."""
+
+    m_def = Section(
+        label='Spin coating',
+        description=(
+            'Spin coating of a spacer layer, e.g. PMMA, on a chip; its datetime is '
+            'the coating date. Its input is the chip, its output the coated chip '
+            'entry that describes the layer.'
+        ),
+        a_eln=ELNAnnotation(
+            properties=SectionProperties(
+                editable=dict(exclude=['samples']),
+                order=[
+                    'name',
+                    'datetime',
+                    'chip',
+                    'coated_sample',
+                    'resist',
+                    'spin_speed',
+                    'acceleration',
+                    'spin_time',
+                    'n_layers',
+                    'bake_temperature',
+                    'bake_time',
+                    'description',
+                ],
+            )
+        ),
+    )
+
+    chip = Quantity(
+        type=AGE_Sample,
+        description='The chip that is coated (input).',
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.ReferenceEditQuantity, label='Chip'
+        ),
+    )
+
+    coated_sample = Quantity(
+        type=AGE_CoatedSample,
+        description='The coated chip entry of the layer (output).',
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.ReferenceEditQuantity, label='Coated chip'
+        ),
+    )
+
+    resist = Quantity(
+        type=str,
+        description='Resist, e.g. PMMA 950K A11.',
+        a_eln=ELNAnnotation(component=ELNComponentEnum.StringEditQuantity),
+    )
+
+    spin_speed = Quantity(
+        type=float,
+        unit='1/minute',
+        description='Spin speed in revolutions per minute (rpm).',
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.NumberEditQuantity, label='Spin speed (rpm)'
+        ),
+        a_display={'unit': '1/minute'},
+    )
+
+    acceleration = Quantity(
+        type=float,
+        unit='1/minute/second',
+        description='Spin acceleration in rpm per second.',
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.NumberEditQuantity,
+            label='Acceleration (rpm/s)',
+        ),
+        a_display={'unit': '1/minute/second'},
+    )
+
+    spin_time = Quantity(
+        type=float,
+        unit='s',
+        description='Time at spin speed.',
+        a_eln=ELNAnnotation(component=ELNComponentEnum.NumberEditQuantity),
+        a_display={'unit': 's'},
+    )
+
+    n_layers = Quantity(
+        type=int,
+        description='Resist layers coated on top of each other.',
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.NumberEditQuantity, label='Layers'
+        ),
+    )
+
+    bake_temperature = Quantity(
+        type=float,
+        unit='celsius',
+        description='Hotplate temperature of the bake after coating.',
+        a_eln=ELNAnnotation(component=ELNComponentEnum.NumberEditQuantity),
+        a_display={'unit': 'celsius'},
+    )
+
+    bake_time = Quantity(
+        type=float,
+        unit='s',
+        description='Duration of the bake after coating.',
+        a_eln=ELNAnnotation(component=ELNComponentEnum.NumberEditQuantity),
+        a_display={'unit': 's'},
+    )
+
+    def normalize(self, archive, logger):
+        self.method = 'Spin coating'
+        chip = process_sample('Chip', self.chip, logger)
+        coated_sample = process_sample('Coated chip', self.coated_sample, logger)
+        self.samples = [*chip, *coated_sample]
+        super().normalize(archive, logger)
+        # Process makes all samples outputs; the chip is the input.
+        archive.workflow2.inputs = [
+            Link(name=s.name, section=s.reference) for s in chip
+        ]
+        archive.workflow2.outputs = [
+            Link(name=s.name, section=s.reference) for s in coated_sample
+        ]
+
+
+def process_sample(name: str, reference, logger) -> list:
+    """The sample entry of a process as CompositeSystemReference, in a list; empty
+    without reference."""
+    if reference is None:
+        return []
+    try:
+        lab_id = resolved(reference).lab_id
+    except Exception as e:
+        logger.warning(f'{name} of the spin coating not loaded: {e!r}')
+        lab_id = None
+    return [CompositeSystemReference(name=name, lab_id=lab_id, reference=reference)]
 
 
 m_package.__init_metainfo__()

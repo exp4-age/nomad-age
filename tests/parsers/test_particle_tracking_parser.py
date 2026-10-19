@@ -398,6 +398,28 @@ def test_reprocessing_rewrites_old_tracks_entries_without_filtered_values(
     assert data['name'] == 'rec'
 
 
+def test_entry_files_do_not_store_values_from_samples(tmp_path, monkeypatch):
+    write_video(tmp_path / 'rec.h5', recording(ID_A))
+    written = parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+    entry_file = tmp_path / 'rec.h5.archive.yaml'
+    text = entry_file.read_text()
+    # the processed archive holds the values that normalizing fills in
+    processed = {
+        **written,
+        'particles': [{'name': 'M270 batch 3'}],
+        'chips': [{'name': '2023_0418'}],
+        'spacer_thickness': 3369.25,
+    }
+    eid = get_entry_id('test_upload', 'rec.h5.archive.yaml')
+    stored_archives(monkeypatch, {eid: processed})
+
+    parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+
+    # unchanged, so neither written nor processed again
+    assert entry_file.read_text() == text
+    assert not written.keys() & {'particles', 'chips', 'spacer_thickness'}
+
+
 @pytest.mark.parametrize(
     'background, dtype, illumination',
     [
@@ -727,8 +749,12 @@ def test_video_entry_passes_its_samples_and_instruments_to_its_tracks(tmp_path):
     write_tracks(tmp_path / 'rec_trajs.h5', make_tracks(), recording(ID_A))
     write_tracks(tmp_path / 'other_trajs.h5', make_tracks(), recording(ID_B))
     rec = parse(ParticleTrackingParser(), tmp_path, 'rec_trajs.h5')
-    # written by an older version
-    rec.update(filtered_tracks_file='rec_filtered_trajs.h5', n_particles_filtered=2)
+    # written by an older version; particles as a save in the GUI writes them
+    rec.update(
+        filtered_tracks_file='rec_filtered_trajs.h5',
+        n_particles_filtered=2,
+        particles=[{'name': 'M450 batch 1'}],
+    )
     with open(tmp_path / 'rec_trajs.h5.archive.yaml', 'w') as f:
         yaml.dump({'data': rec}, f)
     other = parse(ParticleTrackingParser(), tmp_path, 'other_trajs.h5')
@@ -755,6 +781,6 @@ def test_video_entry_passes_its_samples_and_instruments_to_its_tracks(tmp_path):
     assert lab_ids(tracks['instruments']) == ['OBJ-20x']
     assert tracks['n_particles'] == 3
     assert tracks['video'] == get_hash_ref('test_upload', 'renamed.h5.archive.yaml')
-    assert not tracks.keys() & FILTERED_KEYS
+    assert not tracks.keys() & (FILTERED_KEYS | {'particles'})
     with open(tmp_path / 'other_trajs.h5.archive.yaml') as f:
         assert yaml.safe_load(f)['data'] == other

@@ -15,6 +15,14 @@ For a recording `X` the parsers create these entries:
 | `X_filtered_trajs.h5` | `AGE_ParticleTracking` | only for recordings uploaded without `X_trajs.h5` |
 | `*.h5` with datasets `imgs`, `poss`, `tgs` | `AGE_FocusSweep` | images and sharpness of a microscope z sweep |
 
+Videos, tracks and focus sweeps list their samples by kind under `particles`
+(linked `AGE_Particles` entries) and `chips` (linked `AGE_Sample` entries, and
+the chips of linked `AGE_CoatedSample` entries), each by the name of the linked
+entry; `spacer_thickness` is the one of the linked coated chip. The search apps
+filter by them. They are filled from `samples` each time the entry is processed
+and are not stored in the entry files; a sample whose entry cannot be loaded is
+left out with a warning.
+
 The entries are written next to the files as `<file>.archive.yaml`. Filtered
 trajectories are not kept: they are reproduced from the unfiltered ones with the
 filter of the upload, documented once per upload in an `AGE_TrajectoryFiltering`
@@ -35,6 +43,35 @@ Without `inputs`, the inputs of the filter are all tracks entries
 (`*_trajs.h5.archive.yaml`, except filtered-only ones) of the upload when it is
 processed; each tracks entry then lists the filter under "referenced by".
 Tracks entries added later are linked when the filter entry is processed again.
+
+## Coated chips and spin coating
+
+A chip (`AGE_Sample`, e.g. `2023_0418`) gets a spacer layer, e.g. PMMA, by spin
+coating; after some experiments the layer is removed and a new one coated. Each
+layer is an ELN entry "Coated chip" (`AGE_CoatedSample`) with lab_id
+`<chip>_PMMA<n>`: it references its `chip` and holds `spacer_thickness` ± its
+uncertainty (standard error of the mean over the profilometry points on a
+scratch in the layer), `date_coated` and `date_removed`. Recordings link the
+coated chip they were measured on under samples, by its lab_id or a reference.
+
+A "Spin coating" entry (`AGE_SpinCoating`) documents how a layer was made:
+resist, spin speed and acceleration, spin time, layers, bake temperature and time;
+its datetime is the coating date. Its `chip` is the input and its
+`coated_sample` the output of its workflow; both are also listed as its samples.
+
+```yaml
+data:
+  m_def: nomad_age.schema_packages.age_schema.AGE_CoatedSample
+  lab_id: 2023_0418_PMMA2
+  chip: ../upload/archive/mainfile/2023_0418.archive.yaml#data
+  spacer_thickness: 3369.25            # nm
+  spacer_thickness_uncertainty: 36.9   # nm
+  thickness_method: profilometry (scratch)
+  n_thickness_points: 4
+  date_coated: 2025-03-12
+```
+
+The "AGE Samples" app shows chips, coated chips and spin coatings.
 
 
 ## Development

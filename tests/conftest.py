@@ -5,6 +5,7 @@ import types
 import pytest
 from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.datamodel.context import ClientContext
+from nomad.metainfo import MetainfoReferenceError
 from nomad.parsing.parser import ArchiveParser
 
 UPLOAD_ID = 'test_upload'
@@ -59,3 +60,27 @@ def entry_references():
         }
 
     return references
+
+
+class StoredArchivesContext(ClientContext):
+    """Stand-in for the server context of processing: references load the
+    processed archives of entries of any upload; other entries fail to load."""
+
+    def __init__(self, local_dir, archives: dict):
+        super().__init__(local_dir=str(local_dir), upload_id=UPLOAD_ID)
+        self.stored = archives
+
+    def load_archive(self, entry_id, upload_id, installation_url):
+        try:
+            data = self.stored[(upload_id, entry_id)]
+        except KeyError:
+            raise MetainfoReferenceError(f'Could not load {entry_id}.')
+        archive = {'metadata': {'upload_id': upload_id, 'entry_id': entry_id}}
+        return EntryArchive.m_from_dict({**archive, 'data': data}, m_context=self)
+
+
+@pytest.fixture
+def stored_archives_context():
+    """Context of a processed entry in a directory whose references load the
+    data of `archives`, a dict by (upload id, entry id)."""
+    return StoredArchivesContext
