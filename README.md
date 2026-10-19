@@ -4,6 +4,38 @@ A NOMAD plugin for the AGE.
 
 This `nomad` plugin was generated with `Cookiecutter` along with `@nomad`'s [`cookiecutter-nomad-plugin`](https://github.com/FAIRmat-NFDI/cookiecutter-nomad-plugin) template.
 
+## Particle tracking entries
+
+For a recording `X` the parsers create these entries:
+
+| File | Entry type | Content |
+| --- | --- | --- |
+| `X.h5` with dataset `frames` (camera video) | `AGE_ParticleTransportVideo` | camera settings, first and last frame; samples (chips, particles) and instruments (objective) of the recording are edited here |
+| `X_trajs.h5` (trackpy trajectories) | `AGE_ParticleTracking` | counts and plot of the unfiltered trajectories; `video` references the video entry, which lists the tracks under "referenced by" |
+| `X_filtered_trajs.h5` | `AGE_ParticleTracking` | only for recordings uploaded without `X_trajs.h5` |
+| `*.h5` with datasets `imgs`, `poss`, `tgs` | `AGE_FocusSweep` | images and sharpness of a microscope z sweep |
+
+The entries are written next to the files as `<file>.archive.yaml`. Filtered
+trajectories are not kept: they are reproduced from the unfiltered ones with the
+filter of the upload, documented once per upload in an `AGE_TrajectoryFiltering`
+entry ("Trajectory filtering") that users create, e.g. as `filter.archive.yaml`:
+
+```yaml
+data:
+  m_def: nomad_age.schema_packages.particle_tracking_schema.AGE_TrajectoryFiltering
+  name: Trajectory filter
+  min_frames: 20            # trackpy.filter_stubs: keeps trajectories with >= 20 frames
+  min_net_displacement: 5   # pixels; keeps particles that move farther between first and last point
+  displacement_axes: [x]    # |Δx|; Euclidean distance for several axes
+  software: trackpy 0.7
+  script_file: filtering.py
+```
+
+Without `inputs`, the inputs of the filter are all tracks entries
+(`*_trajs.h5.archive.yaml`, except filtered-only ones) of the upload when it is
+processed; each tracks entry then lists the filter under "referenced by".
+Tracks entries added later are linked when the filter entry is processed again.
+
 
 ## Development
 

@@ -168,23 +168,27 @@ def user_editable_keys(section_def) -> set:
     return keys
 
 
-def merge_stored_values(fresh: dict, stored, editable: set) -> dict:
+def merge_stored_values(fresh: dict, stored, editable: set, parser_owned=()) -> dict:
     """The fresh parse plus the stored values that users may have changed.
 
-    Stored values win for editable keys and for keys the parser does not set;
-    parsed values such as numbers, figures and file links come from `fresh`.
+    Stored values win for editable keys and for keys the parser does not set,
+    except for the keys in `parser_owned`, which only the parse sets; parsed
+    values such as numbers, figures and file links come from `fresh`.
     """
     merged = dict(fresh)
     for key, value in stored.items():
+        if key in parser_owned:
+            continue
         if key in editable or key not in merged:
             merged[key] = value
     return merged
 
 
-def update_entry(entry, eid, archive, logger, parsed_wins=()):
+def update_entry(entry, eid, archive, logger, parsed_wins=(), parser_owned=()):
     """`entry` merged with the stored entry `eid` of the same upload, see
     merge_stored_values; for the keys in `parsed_wins` the parsed value wins even
-    if users may edit it.
+    if users may edit it. Stored keys that the schema no longer defines are
+    dropped.
 
     The stored archive is read directly, not via the search index: NOMAD 1.4.3
     parses each file of a new upload twice, and on the second run the entry
@@ -199,7 +203,11 @@ def update_entry(entry, eid, archive, logger, parsed_wins=()):
             entry_data = ar[eid]['data']
             entry_data.pop('m_def', None)
             editable = user_editable_keys(type(entry).m_def) - set(parsed_wins)
-            new_entry_dict = merge_stored_values(new_entry_dict, entry_data, editable)
+            merged = merge_stored_values(
+                new_entry_dict, entry_data, editable, parser_owned
+            )
+            defined = type(entry).m_def.all_properties
+            new_entry_dict = {k: v for k, v in merged.items() if k in defined}
     except Exception as e:
         logger.error(f'Stored entry {eid} could not be merged: {e!r}')
     return type(entry).m_from_dict(new_entry_dict)
