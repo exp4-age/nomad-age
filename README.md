@@ -118,6 +118,21 @@ Currently, NOMAD has two distinct flavors that are relevant depending on your ro
 
 Read the [NOMAD plugin documentation](https://nomad-lab.eu/prod/v1/staging/docs/howto/oasis/plugins_install.html) for all details on how to deploy the plugin on your NOMAD instance.
 
+### Entry hash of aux files
+
+NOMAD's `entry_hash` reads the mainfile and every other file in its directory
+(the "aux files") for every entry. Since our uploads keep large videos next to small
+measurement files, the plugin replaces `StagingUploadFiles.entry_hash` when its
+entry points are loaded (`nomad_age.utils.entry_hash.install()`): the mainfile
+content is hashed in full, aux files only by path, size and modification time.
+Entries without aux files keep NOMAD's hash. Set `NOMAD_AGE_FULL_ENTRY_HASH=1` in the
+NOMAD worker environment to keep NOMAD's original implementation.
+
+Switching implementations changes the `entry_hash` of entries with aux files, so
+these entries get a new `entry_timestamp` on their next reprocessing. The same
+happens when aux files get new modification times, e.g. when a published upload is
+extracted back to staging.
+
 ### Adding this plugin in your local NOMAD installation and the source code of NOMAD
 
 Modify the text file under `/nomad/default_plugins.txt` and add:

@@ -1,11 +1,14 @@
 from nomad.config.models.plugins import ParserEntryPoint
 from pydantic import Field
 
+from nomad_age.utils.entry_hash import install as install_entry_hash
+
 
 class NewParserEntryPoint(ParserEntryPoint):
     parameter: int = Field(0, description='Custom configuration parameter')
 
     def load(self):
+        install_entry_hash()
         from nomad_age.parsers.parser import NewParser
 
         return NewParser(**self.dict())
@@ -22,6 +25,7 @@ class LMOKEParserEntryPoint(ParserEntryPoint):
     parameter: int = Field(0, description='Custom configuration parameter')
 
     def load(self):
+        install_entry_hash()
         from nomad_age.parsers.LMOKEparser import LMOKEParser
 
         return LMOKEParser(**self.dict())
@@ -40,6 +44,7 @@ class FieldCoolingParserEntryPoint(ParserEntryPoint):
     parameter: int = Field(0, description='Custom configuration parameter')
 
     def load(self):
+        install_entry_hash()
         from nomad_age.parsers.field_cooling_parser import FieldCoolingParser
 
         return FieldCoolingParser(**self.dict())
@@ -57,6 +62,7 @@ class ParticleTrackingParserEntryPoint(ParserEntryPoint):
     parameter: int = Field(0, description='Custom configuration parameter')
 
     def load(self):
+        install_entry_hash()
         from nomad_age.parsers.particle_tracking_parser import ParticleTrackingParser
 
         return ParticleTrackingParser(**self.dict())
@@ -77,6 +83,7 @@ class FocusSweepParserEntryPoint(ParserEntryPoint):
     parameter: int = Field(0, description='Custom configuration parameter')
 
     def load(self):
+        install_entry_hash()
         from nomad_age.parsers.particle_tracking_parser import FocusSweepParser
 
         return FocusSweepParser(**self.dict())
@@ -95,6 +102,7 @@ class ParticleTransportVideoParserEntryPoint(ParserEntryPoint):
     parameter: int = Field(0, description='Custom configuration parameter')
 
     def load(self):
+        install_entry_hash()
         from nomad_age.parsers.particle_tracking_parser import (
             ParticleTransportVideoParser,
         )
