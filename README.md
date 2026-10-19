@@ -23,7 +23,13 @@ filter by them. They are filled from `samples` each time the entry is processed
 and are not stored in the entry files; a sample whose entry cannot be loaded is
 left out with a warning.
 
-The entries are written next to the files as `<file>.archive.yaml`. Filtered
+The entries are written next to the files as `<file>.archive.yaml`. The entry of
+the original file itself (`AGE_RawFile`, named after the file) records it for
+archival: upload-relative path (`file_name`), `file_type`, `file_size`, `sha256`
+and modification time (`modified`, UTC), filled on every processing run, and
+`processed_archive`, the link to the written entry. The written entries link back
+in `raw_file` (also for field cooling logs), listed under "References"; existing
+entry files gain it on the next reprocessing, keeping user edits. Filtered
 trajectories are not kept: they are reproduced from the unfiltered ones with the
 filter of the upload, documented once per upload in an `AGE_TrajectoryFiltering`
 entry ("Trajectory filtering") that users create, e.g. as `filter.archive.yaml`:

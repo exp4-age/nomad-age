@@ -24,6 +24,7 @@ from nomad.metainfo import (
 
 from nomad_age.schema_packages.age_schema import (
     AGE_CoatedSample,
+    AGE_FromRawFile,
     AGE_Particles,
     AGE_Sample,
     resolved,
@@ -184,7 +185,9 @@ FROM_SAMPLES = tuple(
 )
 
 
-class AGE_ParticleTransport(AGE_ParticleMicroscopy, PlotSection, AGE_Measurement):
+class AGE_ParticleTransport(
+    AGE_ParticleMicroscopy, AGE_FromRawFile, PlotSection, AGE_Measurement
+):
     """A particle transport experiment: its camera video and the tracks made from
     it share these quantities, above all the recording id."""
 
@@ -435,7 +438,9 @@ class AGE_TrajectoryFiltering(Analysis, EntryData):
             )
 
 
-class AGE_FocusSweep(AGE_ParticleMicroscopy, PlotSection, AGE_Measurement, EntryData):
+class AGE_FocusSweep(
+    AGE_ParticleMicroscopy, AGE_FromRawFile, PlotSection, AGE_Measurement, EntryData
+):
     m_def = Section(
         label='Focus Sweep',
         description=(

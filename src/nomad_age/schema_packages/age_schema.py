@@ -1,5 +1,7 @@
+import os
+
 from nomad.config import config
-from nomad.datamodel import EntryData
+from nomad.datamodel.data import ArchiveSection, EntryData
 from nomad.datamodel.metainfo.annotations import (
     ELNAnnotation,
     ELNComponentEnum,
@@ -29,9 +31,60 @@ m_package = SchemaPackage(name='age_schema')
 
 
 class AGE_RawFile(EntryData):
+    """An original data file of an upload, kept for archival. The parser writes its
+    data to an editable entry file (processed_archive) and fingerprints the file
+    here."""
+
     m_def = Section(label='AGE Raw File (Logfile)', description='AGE raw file data.')
+    name = Quantity(
+        type=str,
+        description='Name of the file; also the name of the entry.',
+    )
+    file_name = Quantity(
+        type=str,
+        description='Path of the file relative to the raw files of the upload.',
+    )
+    file_type = Quantity(
+        type=str,
+        description=(
+            'Kind of file, e.g. particle transport video, trajectories, focus sweep '
+            'or field cooling log.'
+        ),
+    )
+    file_size = Quantity(
+        type=int,
+        unit='byte',
+        description='Size of the file.',
+    )
+    sha256 = Quantity(
+        type=str,
+        description='SHA-256 checksum of the file content, hex.',
+    )
+    modified = Quantity(
+        type=Datetime,
+        description='Modification time of the file (UTC) when it was parsed.',
+    )
     processed_archive = Quantity(
         type=Activity,
+    )
+
+    def normalize(self, archive, logger):
+        if self.name is None and self.file_name:
+            self.name = os.path.basename(self.file_name)
+        if self.name:
+            archive.metadata.entry_name = self.name
+        super().normalize(archive, logger)
+
+
+class AGE_FromRawFile(ArchiveSection):
+    """An entry that a parser writes from an original data file."""
+
+    raw_file = Quantity(
+        type=AGE_RawFile,
+        description=(
+            'Entry of the original data file that this entry is parsed from, with '
+            'its size, SHA-256 checksum and modification time. Set by the parser.'
+        ),
     )
 
 

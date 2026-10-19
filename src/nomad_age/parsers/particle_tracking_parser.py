@@ -26,6 +26,7 @@ from nomad_age.schema_packages.particle_tracking_schema import (
     AGE_ParticleTracking,
     AGE_ParticleTransportVideo,
 )
+from nomad_age.utils.fingerprint import file_fingerprint
 from nomad_age.utils.utils import (
     YAML_LOADER,
     create_archive,
@@ -583,12 +584,11 @@ def share_with_tracks(video, archive: EntryArchive, logger) -> None:
         return
     directory, video_name = os.path.split(path)
     rel_directory = os.path.dirname(video.video_file)
+    upload_id = archive.metadata.upload_id
     shared = {
         'samples': [sample.m_to_dict() for sample in video.samples],
         'instruments': [instrument.m_to_dict() for instrument in video.instruments],
-        'video': get_hash_ref(
-            archive.metadata.upload_id, f'{video.video_file}.archive.yaml'
-        ),
+        'video': get_hash_ref(upload_id, f'{video.video_file}.archive.yaml'),
     }
     for name in sorted(os.listdir(directory)):
         entry_file = os.path.join(rel_directory, f'{name}.archive.yaml')
@@ -602,11 +602,16 @@ def share_with_tracks(video, archive: EntryArchive, logger) -> None:
             continue
         with archive.m_context.raw_file(entry_file) as f:
             data = yaml.load(f, Loader=YAML_LOADER)['data']
+        # as the tracks parser sets it, which may not have run since an update
+        wanted = {
+            **shared,
+            'raw_file': get_hash_ref(upload_id, os.path.join(rel_directory, name)),
+        }
         if all(
-            (data.get(key) or None) == (value or None) for key, value in shared.items()
+            (data.get(key) or None) == (value or None) for key, value in wanted.items()
         ):
             continue
-        data.update(shared)
+        data.update(wanted)
         # e.g. the filtered counts that older versions wrote, or particles, chips
         # and spacer thickness that a save in the GUI wrote
         defined = AGE_ParticleTracking.m_def.all_properties
@@ -624,19 +629,29 @@ def share_with_tracks(video, archive: EntryArchive, logger) -> None:
 def store_entry(
     entry,
     archive: EntryArchive,
-    entry_file_name: str,
+    mainfile: str,
+    file_type: str,
     logger,
     parsed_wins=(),
     parser_owned=(),
 ) -> None:
-    """Write `entry` as YAML entry; on reprocessing, stored values that users may
-    edit win, except for the keys in `parsed_wins`; stored values of the keys in
-    `parser_owned` and of FROM_SAMPLES, which the stored archive holds as
-    normalizer output, are dropped."""
+    """Write `entry`, parsed from `mainfile` (a `file_type`), as YAML entry next
+    to it; the entry of `mainfile` itself records the file and links both ways.
+
+    On reprocessing, stored values that users may edit win, except for the keys
+    in `parsed_wins`; stored values of the keys in `parser_owned` and of
+    FROM_SAMPLES, which the stored archive holds as normalizer output, are
+    dropped."""
     upload_id = archive.metadata.upload_id
+    rel_mainfile = archive.metadata.mainfile or os.path.basename(mainfile)
+    entry_file_name = f'{rel_mainfile}.archive.yaml'
     archive.data = AGE_RawFile(
-        processed_archive=get_hash_ref(upload_id, entry_file_name)
+        file_name=rel_mainfile,
+        file_type=file_type,
+        processed_archive=get_hash_ref(upload_id, entry_file_name),
+        **file_fingerprint(mainfile),
     )
+    entry.raw_file = get_hash_ref(upload_id, rel_mainfile)
     if not create_archive(entry, archive, entry_file_name):
         eid = get_entry_id(upload_id, entry_file_name)
         parser_owned = (*parser_owned, *FROM_SAMPLES)
@@ -696,11 +711,17 @@ class ParticleTrackingParser(MatchingParser):
             for instrument in instruments:
                 entry.instruments.append(instrument)
             parsed_wins += ('samples', 'instruments')
+        file_type = (
+            'filtered trajectories'
+            if mainfile.endswith(FILTERED_TRACKS_SUFFIX)
+            else 'trajectories'
+        )
         # Figures of filtered tracks, which older versions plotted, do not stay.
         store_entry(
             entry,
             archive,
-            f'{rel_mainfile}.archive.yaml',
+            mainfile,
+            file_type,
             logger,
             parsed_wins,
             parser_owned=('figures',),
@@ -715,7 +736,7 @@ class FocusSweepParser(MatchingParser):
         rel_mainfile = archive.metadata.mainfile or os.path.basename(mainfile)
         entry = build_focus_sweep_entry(mainfile, rel_mainfile)
         link_AGE_samples(entry, chip_ids_from_filename(mainfile), archive, logger)
-        store_entry(entry, archive, f'{rel_mainfile}.archive.yaml', logger)
+        store_entry(entry, archive, mainfile, 'focus sweep', logger)
 
 
 class ParticleTransportVideoParser(MatchingParser):
@@ -726,4 +747,4 @@ class ParticleTransportVideoParser(MatchingParser):
         rel_mainfile = archive.metadata.mainfile or os.path.basename(mainfile)
         entry = build_video_entry(mainfile, rel_mainfile)
         link_AGE_samples(entry, chip_ids_from_filename(mainfile), archive, logger)
-        store_entry(entry, archive, f'{rel_mainfile}.archive.yaml', logger)
+        store_entry(entry, archive, mainfile, 'particle transport video', logger)
