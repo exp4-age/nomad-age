@@ -26,6 +26,7 @@ from nomad_age.schema_packages.particle_tracking_schema import (
     AGE_ParticleTransportVideo,
 )
 from nomad_age.utils.utils import (
+    YAML_LOADER,
     create_archive,
     find_existing_AGE_sample,
     get_entry_id,
@@ -45,7 +46,6 @@ RECORDING_ID_ATTR = 'recording_id'
 # ids or a list of ids.
 PARTICLES_ATTR = 'particles'
 OBJECTIVE_ATTR = 'objective'
-YAML_LOADER = getattr(yaml, 'CSafeLoader', yaml.SafeLoader)
 PYTABLES_ATTRS = {'CLASS', 'PYTABLES_FORMAT_VERSION', 'TITLE', 'VERSION'}
 REQUIRED_TRACK_COLUMNS = ('x', 'y', 'frame', 'particle')
 MAX_PLOT_TRACKS = 100
