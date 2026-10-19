@@ -1,6 +1,8 @@
 import importlib
 
 import pytest
+from nomad.datamodel.data import EntryData
+from nomad.datamodel.metainfo.basesections import BaseSection
 
 from nomad_age import apps
 
@@ -49,3 +51,41 @@ def test_app_columns_menus_and_widgets_show_schema_quantities(app):
         for name in sub_sections:
             section_def = section_def.all_sub_sections[name].sub_section
         assert quantity in section_def.all_quantities, f'{path} of {section_def.name}'
+
+
+def test_inventory_app_is_a_valid_registered_plugin():
+    from nomad.config import config
+
+    config.load_plugins()
+    entry_point = config.get_plugin_entry_point('nomad_age.apps:age_inventory')
+    assert entry_point.app.label == 'AGE Inventory'
+    assert entry_point.app.category == 'Experiment'
+
+
+def test_inventory_app_shows_every_inventory_type():
+    """The inventory types are the AGE_Particles and AGE_Objective entries; the
+    app locks to and includes exactly the types of INVENTORY_SCHEMAS, and the
+    name, ID and description columns (BaseSection) apply to all of them."""
+    types = []
+    for qualified_name in apps.INVENTORY_SCHEMAS:
+        module, name = qualified_name.rsplit('.', 1)
+        types.append(getattr(importlib.import_module(module), name))
+    assert {section.__name__ for section in types} >= {'AGE_Particles', 'AGE_Objective'}
+    for section in types:
+        assert issubclass(section, EntryData)
+        assert issubclass(section, BaseSection)
+
+    app = apps.age_inventory.app
+    assert app.filters_locked == {
+        'section_defs.definition_qualified_name': list(apps.INVENTORY_SCHEMAS)
+    }
+    for qualified_name in apps.INVENTORY_SCHEMAS:
+        assert f'*#{qualified_name}' in app.search_quantities.include
+    # The app names the production (NOMAD 1.4) BaseSection, which differs from
+    # the one of the nomad-lab version tests may run with.
+    base_entity = f'#{apps.base_entity_schema}'
+    assert {
+        column.search_quantity
+        for column in app.columns
+        if column.search_quantity.endswith(base_entity)
+    } == {f'data.{name}{base_entity}' for name in ('name', 'lab_id', 'description')}

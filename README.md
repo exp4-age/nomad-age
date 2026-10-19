@@ -73,6 +73,19 @@ data:
 
 The "AGE Samples" app shows chips, coated chips and spin coatings.
 
+## Inventory
+
+The "AGE Inventory" app lists lab equipment and consumables: particle batches
+(`AGE_Particles`) and microscope objectives (`AGE_Objective`), with columns and
+filters for type, name, ID (lab_id), particle type, batch and batch date,
+magnification and numerical aperture. To see where an item was used, open it:
+"Referenced by" in Entry References lists the recordings linking it.
+
+The inventory entry types are listed once, in `INVENTORY_SCHEMAS` in
+`src/nomad_age/apps/__init__.py`; a new type (e.g. cameras, magnets, chemicals)
+is added there to appear in the app, plus columns or menu items for its own
+quantities.
+
 
 ## Development
 
