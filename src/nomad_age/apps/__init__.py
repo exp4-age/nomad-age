@@ -347,10 +347,10 @@ particle_tracking = AppEntryPoint(
             'Particle tracking measurements of the AGE lab. Chips and particle '
             'batches are the samples of a measurement, objectives its instruments: '
             'filter by their IDs to find all recordings of a chip or particle '
-            'batch. Particle and localization counts are read from the tracks '
-            'file, the filtered counts from the filtered tracks file. The '
-            'recording ID is the random id that the acquisition software gives '
-            'each recording; video, tracks and filtered tracks carry it.'
+            'batch. Particle and localization counts are read from the unfiltered '
+            'tracks file; the filter of an upload is documented in its Trajectory '
+            'filtering entry. The recording ID is the random id that the '
+            'acquisition software gives each recording; video and tracks carry it.'
         ),
         menu_title='Particle tracking',
         columns=[
@@ -361,18 +361,8 @@ particle_tracking = AppEntryPoint(
                 selected=True,
             ),
             Column(
-                search_quantity=tracking('n_particles_filtered'),
-                title='Particles (filtered)',
-                format=count,
-            ),
-            Column(
                 search_quantity=tracking('n_localizations'),
                 title='Localizations',
-                format=count,
-            ),
-            Column(
-                search_quantity=tracking('n_localizations_filtered'),
-                title='Localizations (filtered)',
                 format=count,
             ),
         ],

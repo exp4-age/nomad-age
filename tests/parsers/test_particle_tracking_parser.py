@@ -1,15 +1,20 @@
 import base64
 import io
 import logging
+import sys
+import types
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import h5py
+import nomad
 import numpy as np
 import pandas as pd
 import pytest
 import yaml
 from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.datamodel.context import ClientContext
+from nomad.datamodel.metainfo.plot import PlotlyFigure
 from PIL import Image
 
 from nomad_age.parsers import (
@@ -39,10 +44,17 @@ from nomad_age.schema_packages.particle_tracking_schema import (
     AGE_ParticleTransportVideo,
 )
 from nomad_age.utils.utils import (
+    get_entry_id,
     get_hash_ref,
     merge_stored_values,
     user_editable_keys,
 )
+
+FILTERED_KEYS = {
+    'filtered_tracks_file',
+    'n_particles_filtered',
+    'n_localizations_filtered',
+}
 
 # Root attributes as written by the acquisition software (harvesters_pg).
 CAMERA_ATTRS = {
@@ -219,17 +231,171 @@ def test_filtered_only_recording_takes_camera_settings_from_video(tmp_path):
         str(tmp_path), '', 'rec', find_recording_files(str(tmp_path), 'rec')
     )
 
-    assert entry.tracks_file is None
-    assert entry.n_particles is None
-    assert entry.filtered_tracks_file == 'rec_filtered_trajs.h5'
+    # the filtered tracks are the only tracks of the recording
+    assert entry.tracks_file == 'rec_filtered_trajs.h5'
     assert entry.video_file == 'rec.h5'
-    assert entry.n_particles_filtered == 2
-    assert entry.n_localizations_filtered == 6
+    assert (entry.n_particles, entry.n_localizations) == (2, 6)
     assert entry.camera_model == 'MC2066'
     assert entry.frame_rate.to('Hz').magnitude == 100
     # 14:43:48 local summer time (UTC+2)
     assert entry.datetime == datetime(2026, 4, 15, 12, 43, 48, tzinfo=timezone.utc)
     assert entry.illumination == 'darkfield'  # the video frames are black
+
+
+def test_filtered_only_recording_references_its_video(tmp_path):
+    tracks = make_tracks()
+    write_filtered_tracks(
+        tmp_path / 'rec_filtered_trajs.h5',
+        tracks[tracks['particle'] < 2],
+        recording(ID_A),
+    )
+    write_video(tmp_path / 'renamed.h5', recording(ID_A))
+
+    data = parse(ParticleTrackingParser(), tmp_path, 'rec_filtered_trajs.h5')
+
+    assert data['video'] == get_hash_ref('test_upload', 'renamed.h5.archive.yaml')
+    assert data['tracks_file'] == 'rec_filtered_trajs.h5'
+    assert data['n_particles'] == 2
+    assert not data.keys() & FILTERED_KEYS
+
+
+def test_tracks_entry_references_its_video_entry(
+    tmp_path, process_entry, entry_references
+):
+    write_tracks(tmp_path / 'rec_trajs.h5', make_tracks(), recording(ID_A))
+    write_video(tmp_path / 'rec.h5', recording(ID_B))  # another recording
+    write_video(tmp_path / 'renamed.h5', recording(ID_A))
+
+    data = parse(ParticleTrackingParser(), tmp_path, 'rec_trajs.h5')
+
+    assert data['video'] == get_hash_ref('test_upload', 'renamed.h5.archive.yaml')
+    # NOMAD indexes the reference, so the video lists the tracks as referencing it
+    tracks = process_entry(tmp_path, 'rec_trajs.h5.archive.yaml')
+    video_id = get_entry_id('test_upload', 'renamed.h5.archive.yaml')
+    assert ('data.video', video_id) in entry_references(tracks)
+
+
+def test_tracks_without_video_have_no_video_reference(
+    tmp_path, process_entry, entry_references, caplog
+):
+    write_tracks(tmp_path / 'rec_trajs.h5', make_tracks(), recording(ID_A))
+
+    data = parse(ParticleTrackingParser(), tmp_path, 'rec_trajs.h5')
+    tracks = process_entry(tmp_path, 'rec_trajs.h5.archive.yaml')
+
+    assert 'video' not in data
+    assert not {path for path, _ in entry_references(tracks)} & {'data.video'}
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+def test_tracks_entry_shows_unfiltered_tracks_next_to_filtered_ones(tmp_path):
+    tracks = make_tracks()
+    tracks['field_voltage'] = 0.05 * tracks['frame']
+    write_tracks(tmp_path / 'rec_trajs.h5', tracks, recording(ID_A))
+    write_filtered_tracks(
+        tmp_path / 'rec_filtered_trajs.h5',
+        tracks[tracks['particle'] < 2],
+        recording(ID_A),
+    )
+
+    data = parse(ParticleTrackingParser(), tmp_path, 'rec_trajs.h5')
+
+    assert not data.keys() & FILTERED_KEYS
+    assert data['tracks_file'] == 'rec_trajs.h5'
+    assert (data['n_particles'], data['n_localizations']) == (3, 7)
+    trajectories, field = data['figures']
+    assert (trajectories['label'], field['label']) == ('Trajectories', 'External field')
+    plotted = trajectories['figure']
+    assert plotted['layout']['title']['text'] == '3 longest tracks of rec_trajs.h5'
+    assert len(plotted['data']) == 3
+
+
+def old_tracks_entry() -> dict:
+    """Tracks entry as older versions wrote it, with the filtered tracks folded
+    in, and edited by users afterwards."""
+    tracks = make_tracks()
+    filtered = tracks[tracks['particle'] < 2]
+    entry = AGE_ParticleTracking(
+        name='rec',
+        tracks_file='rec_trajs.h5',
+        n_particles=3,
+        n_localizations=7,
+        figures=[
+            PlotlyFigure(
+                label='Trajectories',
+                figure=plot_trajectories(
+                    filtered, 'rec_filtered_trajs.h5'
+                ).to_plotly_json(),
+            )
+        ],
+    ).m_to_dict(with_root_def=True)
+    entry.update(
+        filtered_tracks_file='rec_filtered_trajs.h5',
+        n_particles_filtered=2,
+        n_localizations_filtered=6,
+        # user edits
+        description='Chip tilted by 2°',
+        illumination='brightfield',
+        pixel_size=0.345,
+        samples=[{'name': '2023_0418', 'lab_id': '2023_0418'}],
+    )
+    return entry
+
+
+def stored_archives(monkeypatch, entries: dict) -> None:
+    """Stand-in for nomad.files: the processed archives of the upload, by entry id."""
+
+    class StoredArchive:
+        def __init__(self, entry_id):
+            self.entry_id = entry_id
+
+        def __enter__(self):
+            return {self.entry_id: {'data': dict(entries[self.entry_id])}}
+
+        def __exit__(self, *exc):
+            return False
+
+    upload_files = SimpleNamespace(
+        read_archive=lambda entry_id: StoredArchive(entry_id)
+    )
+    files = types.ModuleType('nomad.files')
+    files.UploadFiles = SimpleNamespace(get=lambda upload_id: upload_files)
+    monkeypatch.setitem(sys.modules, 'nomad.files', files)
+    monkeypatch.setattr(nomad, 'files', files, raising=False)
+
+
+def test_reprocessing_rewrites_old_tracks_entries_without_filtered_values(
+    tmp_path, monkeypatch, caplog
+):
+    tracks = make_tracks()
+    write_tracks(tmp_path / 'rec_trajs.h5', tracks, recording(ID_A))
+    write_filtered_tracks(
+        tmp_path / 'rec_filtered_trajs.h5',
+        tracks[tracks['particle'] < 2],
+        recording(ID_A),
+    )
+    write_video(tmp_path / 'rec.h5', recording(ID_A))
+    old = old_tracks_entry()
+    entry_file = tmp_path / 'rec_trajs.h5.archive.yaml'
+    with open(entry_file, 'w') as f:
+        yaml.dump({'data': old}, f)
+    # the processed archive of the old entry file, as written by older versions
+    eid = get_entry_id('test_upload', 'rec_trajs.h5.archive.yaml')
+    stored_archives(monkeypatch, {eid: old})
+
+    data = parse(ParticleTrackingParser(), tmp_path, 'rec_trajs.h5')
+
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert not data.keys() & FILTERED_KEYS
+    (trajectories,) = data['figures']
+    title = trajectories['figure']['layout']['title']['text']
+    assert title == '3 longest tracks of rec_trajs.h5'
+    assert data['video'] == get_hash_ref('test_upload', 'rec.h5.archive.yaml')
+    assert data['description'] == 'Chip tilted by 2°'
+    assert data['illumination'] == 'brightfield'
+    assert data['pixel_size'] == 0.345
+    assert lab_ids(data['samples']) == ['2023_0418']
+    assert data['name'] == 'rec'
 
 
 @pytest.mark.parametrize(
@@ -388,6 +554,12 @@ def test_reprocessing_keeps_user_edits_and_refreshes_parsed_values():
         'n_particles': 3,
         'illumination': 'brightfield',  # the user's choice stays
         'method': 'Particle Tracking',  # not set by the parser: kept
+    }
+    # figures only the parse makes: stored ones go even if the parse makes none
+    assert merge_stored_values({}, stored, editable, parser_owned=('figures',)) == {
+        'illumination': 'brightfield',
+        'n_particles': 2,
+        'method': 'Particle Tracking',
     }
 
 
@@ -554,7 +726,11 @@ def test_tracks_take_samples_and_instruments_from_the_video_entry(tmp_path):
 def test_video_entry_passes_its_samples_and_instruments_to_its_tracks(tmp_path):
     write_tracks(tmp_path / 'rec_trajs.h5', make_tracks(), recording(ID_A))
     write_tracks(tmp_path / 'other_trajs.h5', make_tracks(), recording(ID_B))
-    parse(ParticleTrackingParser(), tmp_path, 'rec_trajs.h5')
+    rec = parse(ParticleTrackingParser(), tmp_path, 'rec_trajs.h5')
+    # written by an older version
+    rec.update(filtered_tracks_file='rec_filtered_trajs.h5', n_particles_filtered=2)
+    with open(tmp_path / 'rec_trajs.h5.archive.yaml', 'w') as f:
+        yaml.dump({'data': rec}, f)
     other = parse(ParticleTrackingParser(), tmp_path, 'other_trajs.h5')
     # uploaded later, under another name
     attrs = with_inventory(recording(ID_A), 'M270-2024-03', 'OBJ-20x')
@@ -578,5 +754,7 @@ def test_video_entry_passes_its_samples_and_instruments_to_its_tracks(tmp_path):
     assert lab_ids(tracks['samples']) == ['M270-2024-03']
     assert lab_ids(tracks['instruments']) == ['OBJ-20x']
     assert tracks['n_particles'] == 3
+    assert tracks['video'] == get_hash_ref('test_upload', 'renamed.h5.archive.yaml')
+    assert not tracks.keys() & FILTERED_KEYS
     with open(tmp_path / 'other_trajs.h5.archive.yaml') as f:
         assert yaml.safe_load(f)['data'] == other

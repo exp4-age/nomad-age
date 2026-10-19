@@ -294,37 +294,30 @@ def plot_external_field(
 def build_particle_tracking_entry(
     directory: str, rel_directory: str, stem: str, files: dict
 ) -> AGE_ParticleTracking:
-    """Entry of one recording.
+    """Entry of one recording: its unfiltered tracks, or its filtered tracks if
+    only these exist.
 
     `files` comes from find_recording_files; `directory` is where they are on
     disk, `rel_directory` is the upload-relative directory used for the links.
     """
     entry = AGE_ParticleTracking(name=stem)
-    tracks = filtered = None
-    if files['tracks']:
-        tracks = read_tracks(os.path.join(directory, files['tracks']))
-        entry.tracks_file = os.path.join(rel_directory, files['tracks'])
+    table_kind = 'tracks' if files['tracks'] else 'filtered_tracks'
+    tracks = None
+    if files[table_kind]:
+        tracks = read_tracks(os.path.join(directory, files[table_kind]))
+        entry.tracks_file = os.path.join(rel_directory, files[table_kind])
         entry.n_particles = int(tracks['particle'].nunique())
         entry.n_localizations = len(tracks)
-    if files['filtered_tracks']:
-        filtered = read_tracks(os.path.join(directory, files['filtered_tracks']))
-        entry.filtered_tracks_file = os.path.join(
-            rel_directory, files['filtered_tracks']
-        )
-        entry.n_particles_filtered = int(filtered['particle'].nunique())
-        entry.n_localizations_filtered = len(filtered)
+        if len(tracks):
+            entry.n_frames = int(tracks['frame'].max()) + 1
     if files['video']:
         entry.video_file = os.path.join(rel_directory, files['video'])
         with h5py.File(os.path.join(directory, files['video']), 'r') as f:
             entry.illumination = guess_illumination(f['frames'][0])
 
-    frame_source = tracks if tracks is not None else filtered
-    if frame_source is not None and len(frame_source):
-        entry.n_frames = int(frame_source['frame'].max()) + 1
-
-    # Older tracks and filtered tracks lack the camera attributes.
+    # Older tracks lack the camera attributes.
     frame_rate = None
-    for kind in ('tracks', 'filtered_tracks', 'video'):
+    for kind in (table_kind, 'video'):
         if not files[kind]:
             continue
         settings = read_h5_attrs(os.path.join(directory, files[kind]))
@@ -341,22 +334,16 @@ def build_particle_tracking_entry(
         entry.datetime = time_from_filename(stem)
 
     figures = []
-    plot_kind = 'filtered_tracks' if filtered is not None else 'tracks'
-    plot_tracks = filtered if filtered is not None else tracks
-    if plot_tracks is not None and len(plot_tracks):
-        trajectories = plot_trajectories(plot_tracks, files[plot_kind])
+    if tracks is not None and len(tracks):
+        trajectories = plot_trajectories(tracks, files[table_kind])
         figures.append(
             PlotlyFigure(label='Trajectories', figure=trajectories.to_plotly_json())
         )
-    # The field is the same for all particles of a frame; the unfiltered tracks
-    # cover the most frames.
-    for table in (tracks, filtered):
-        field = None if table is None else plot_external_field(table, frame_rate)
+        field = plot_external_field(tracks, frame_rate)
         if field is not None:
             figures.append(
                 PlotlyFigure(label='External field', figure=field.to_plotly_json())
             )
-            break
     if figures:
         entry.figures = figures
     return entry
@@ -558,9 +545,31 @@ def raw_os_path(context, rel_path: str) -> Optional[str]:
     return os.path.join(local_dir, rel_path) if local_dir else None
 
 
+def tracks_entry_files(context) -> Optional[list]:
+    """Upload-relative paths of the tracks entry files of the upload of
+    `context`, sorted; None without access to its raw files.
+
+    Entries of filtered tracks (recordings uploaded without their unfiltered
+    tracks) do not count.
+    """
+    root = raw_os_path(context, '')
+    if root is None or not os.path.isdir(root):
+        return None
+    suffix = f'{TRACKS_SUFFIX}.archive.yaml'
+    filtered_suffix = f'{FILTERED_TRACKS_SUFFIX}.archive.yaml'
+    entry_files = []
+    for directory, _, names in os.walk(root):
+        for name in names:
+            if name.endswith(suffix) and not name.endswith(filtered_suffix):
+                path = os.path.join(directory, name)
+                entry_files.append(os.path.relpath(path, root))
+    return sorted(entry_files)
+
+
 def share_with_tracks(video, archive: EntryArchive, logger) -> None:
     """Give the tracks entries of a video's recording the samples and instruments
-    of the video entry, so that they are edited in one place.
+    of the video entry, so that they are edited in one place, and a reference to
+    the video entry.
 
     The tracks are found as their parser finds the video: in the same folder, by
     name or recording id. Tracks entries that change are written and processed
@@ -576,6 +585,9 @@ def share_with_tracks(video, archive: EntryArchive, logger) -> None:
     shared = {
         'samples': [sample.m_to_dict() for sample in video.samples],
         'instruments': [instrument.m_to_dict() for instrument in video.instruments],
+        'video': get_hash_ref(
+            archive.metadata.upload_id, f'{video.video_file}.archive.yaml'
+        ),
     }
     for name in sorted(os.listdir(directory)):
         entry_file = os.path.join(rel_directory, f'{name}.archive.yaml')
@@ -589,27 +601,38 @@ def share_with_tracks(video, archive: EntryArchive, logger) -> None:
             continue
         with archive.m_context.raw_file(entry_file) as f:
             data = yaml.load(f, Loader=YAML_LOADER)['data']
-        if all((data.get(key) or []) == value for key, value in shared.items()):
+        if all(
+            (data.get(key) or None) == (value or None) for key, value in shared.items()
+        ):
             continue
         data.update(shared)
-        data.pop('m_def', None)
-        tracks = AGE_ParticleTracking.m_from_dict(data)
+        # e.g. the filtered counts that older versions wrote
+        defined = AGE_ParticleTracking.m_def.all_properties
+        tracks = AGE_ParticleTracking.m_from_dict(
+            {key: value for key, value in data.items() if key in defined}
+        )
         create_archive(tracks, archive, entry_file, overwrite=True)
-        logger.info(f'Samples and instruments of {name} taken from {video_name}')
+        logger.info(f'Samples, instruments and video of {name} taken from {video_name}')
 
 
 def store_entry(
-    entry, archive: EntryArchive, entry_file_name: str, logger, parsed_wins=()
+    entry,
+    archive: EntryArchive,
+    entry_file_name: str,
+    logger,
+    parsed_wins=(),
+    parser_owned=(),
 ) -> None:
     """Write `entry` as YAML entry; on reprocessing, stored values that users may
-    edit win, except for the keys in `parsed_wins`."""
+    edit win, except for the keys in `parsed_wins`; stored values of the keys in
+    `parser_owned` are dropped."""
     upload_id = archive.metadata.upload_id
     archive.data = AGE_RawFile(
         processed_archive=get_hash_ref(upload_id, entry_file_name)
     )
     if not create_archive(entry, archive, entry_file_name):
         eid = get_entry_id(upload_id, entry_file_name)
-        merged = update_entry(entry, eid, archive, logger, parsed_wins)
+        merged = update_entry(entry, eid, archive, logger, parsed_wins, parser_owned)
         create_archive(merged, archive, entry_file_name, overwrite=True)
 
 
@@ -646,11 +669,14 @@ class ParticleTrackingParser(MatchingParser):
         files = find_recording_files(directory, stem, read_recording_id(mainfile))
         entry = build_particle_tracking_entry(directory, rel_directory, stem, files)
         from_video = None
-        if files['video']:
-            from_video = video_samples_and_instruments(
-                archive, os.path.join(rel_directory, files['video'])
-            )
         parsed_wins = ()
+        if files['video']:
+            rel_video = os.path.join(rel_directory, files['video'])
+            entry.video = get_hash_ref(
+                archive.metadata.upload_id, f'{rel_video}.archive.yaml'
+            )
+            parsed_wins = ('video',)
+            from_video = video_samples_and_instruments(archive, rel_video)
         if from_video is None:
             link_AGE_samples(entry, chip_ids_from_filename(mainfile), archive, logger)
             link_particles_and_objective(entry, entry.camera_settings or {})
@@ -661,8 +687,16 @@ class ParticleTrackingParser(MatchingParser):
                 entry.samples.append(sample)
             for instrument in instruments:
                 entry.instruments.append(instrument)
-            parsed_wins = ('samples', 'instruments')
-        store_entry(entry, archive, f'{rel_mainfile}.archive.yaml', logger, parsed_wins)
+            parsed_wins += ('samples', 'instruments')
+        # Figures of filtered tracks, which older versions plotted, do not stay.
+        store_entry(
+            entry,
+            archive,
+            f'{rel_mainfile}.archive.yaml',
+            logger,
+            parsed_wins,
+            parser_owned=('figures',),
+        )
 
 
 class FocusSweepParser(MatchingParser):
