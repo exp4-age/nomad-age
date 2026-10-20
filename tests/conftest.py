@@ -194,6 +194,9 @@ class FakeTemporal:
         self.published_uploads = set()
         self.in_activity = True
         self.workflow_id = 'process-upload-moke_upload'
+        # True: the runtime was inherited from the forked worker process
+        self.forked_runtime = False
+        self.runtime_resets = 0
         temporal = self
 
         class Client:
@@ -203,7 +206,16 @@ class FakeTemporal:
                 temporal.started.append({'workflow': workflow, 'arg': arg, **kwargs})
 
         async def get_client():
+            if temporal.forked_runtime:
+                raise AssertionError(
+                    'Cannot create client across forks (original runtime PID is 1, '
+                    'current is 44)'
+                )
             return Client()
+
+        def reset_runtime():
+            temporal.runtime_resets += 1
+            temporal.forked_runtime = False
 
         def get_upload(upload_id):
             busy = upload_id in temporal.busy_uploads
@@ -214,6 +226,7 @@ class FakeTemporal:
             )
 
         self.api = SimpleNamespace(
+            reset_runtime=reset_runtime,
             temporal_enabled=True,
             activity=SimpleNamespace(
                 in_activity=lambda: temporal.in_activity,

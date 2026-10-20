@@ -72,7 +72,20 @@ def _load_api() -> SimpleNamespace:
     from temporalio.common import RetryPolicy
     from temporalio.exceptions import WorkflowAlreadyStartedError
 
+    def reset_runtime():
+        """NOMAD processes entries in a process forked from the worker, which
+        inherits the worker's Temporal runtime; Temporal runtimes do not work
+        across forks. Give this process its own runtime."""
+        import nomad.actions.client as nomad_client
+        from temporalio.runtime import Runtime, TelemetryConfig
+
+        with nomad_client._runtime_lock:
+            nomad_client._runtime = Runtime(
+                telemetry=TelemetryConfig(), worker_heartbeat_interval=None
+            )
+
     return SimpleNamespace(
+        reset_runtime=reset_runtime,
         temporal_enabled=config.temporal.enabled,
         activity=activity,
         get_client=get_client,
@@ -145,7 +158,13 @@ def start_refresh(
         )
 
     try:
-        api.run_async(start())
+        try:
+            api.run_async(start())
+        except AssertionError as error:
+            if 'across forks' not in str(error):
+                raise
+            api.reset_runtime()
+            api.run_async(start())
     except api.WorkflowAlreadyStartedError:
         logger.info(f'Refresh {workflow} of the chip plot is already pending.')
         return True
