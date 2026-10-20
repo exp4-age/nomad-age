@@ -44,7 +44,6 @@ sample_schema = 'nomad_age.schema_packages.age_schema.AGE_Sample'
 coated_sample_schema = 'nomad_age.schema_packages.age_schema.AGE_CoatedSample'
 spin_coating_schema = 'nomad_age.schema_packages.age_schema.AGE_SpinCoating'
 base_entity_schema = 'nomad.datamodel.metainfo.basesections.v1.BaseSection'
-sample_item_schema = 'nomad_age.schema_packages.age_schema.AGE_SampleItem'
 age_samples = AppEntryPoint(
     name='age_samples',
     description='AGE sample database.',
@@ -54,41 +53,32 @@ age_samples = AppEntryPoint(
         category='Experiment',
         description='AGE samples database, used to find all our samples',
         readme=(
-            'Chips (AGE Sample), their coated states (Coated chip: one spacer '
-            'layer, e.g. PMMA, with its thickness) and the spin coatings that '
-            'made them. Filter by type to see only one of them.'
+            'Chips (AGE Sample). The coated states of a chip (Coated chip: one '
+            'spacer layer, e.g. PMMA, with its thickness) and the spin coatings '
+            "that made them are listed under 'Referenced by' in the chip's "
+            'Entry References.'
         ),
         search_quantities=SearchQuantities(
             include=[
                 f'*#{sample_schema}',
-                f'*#{coated_sample_schema}',
-                f'*#{spin_coating_schema}',
                 f'*#{base_entity_schema}',
                 'entry_type',
             ]
         ),
-        # One marker base section: a locked list of types matches only entries
-        # of all of them, i.e. none.
-        filters_locked={'section_defs.definition_qualified_name': [sample_item_schema]},
+        # Chips only: coated chips and spin coatings are reached from the chip.
+        # Lock to one type: NOMAD ANDs the values of a locked filter.
+        filters_locked={'section_defs.definition_qualified_name': [sample_schema]},
         columns=Columns(
-            selected=['lab_id', 'state', 'entry_type', 'spacer_thickness'],
+            selected=['lab_id', 'state', 'location'],
             options={
-                'entry_type': Column(quantity='entry_type', label='Type'),
                 'lab_id': Column(
                     quantity=f'data.lab_id#{base_entity_schema}', label='Sample ID'
                 ),
                 'state': Column(
                     quantity=f'data.state#{sample_schema}', label='Sample state'
                 ),
-                'spacer_material': Column(
-                    search_quantity=f'data.spacer_material#{coated_sample_schema}',
-                    title='Spacer material',
-                ),
-                'spacer_thickness': Column(
-                    search_quantity=f'data.spacer_thickness#{coated_sample_schema}',
-                    title='Spacer thickness',
-                    unit='nm',
-                    format=Format(decimals=0, mode='standard'),
+                'location': Column(
+                    quantity=f'data.location#{sample_schema}', label='Location'
                 ),
             },
         ),
@@ -103,18 +93,6 @@ age_samples = AppEntryPoint(
                 ),
                 MenuItemTerms(
                     quantity=f'data.location#{sample_schema}',
-                ),
-                MenuItemTerms(search_quantity='entry_type', title='Type'),
-                MenuItemTerms(
-                    search_quantity=f'data.spacer_material#{coated_sample_schema}',
-                    title='Spacer material',
-                ),
-                MenuItemHistogram(
-                    x=Axis(
-                        search_quantity=f'data.spacer_thickness#{coated_sample_schema}',
-                        unit='nm',
-                    ),
-                    title='Spacer thickness',
                 ),
             ],
         ),
