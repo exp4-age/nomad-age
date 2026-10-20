@@ -193,3 +193,14 @@ def test_repair_refreshes_stale_chips(chips, temporal):
 
     assert summary == '3 chips, 2 stale, 2 refreshes started'
     assert temporal.started_ids == ['age-refresh-chip-A', 'age-refresh-chip-C']
+
+
+def test_refresh_from_a_forked_process_gets_its_own_runtime(measure, temporal):
+    """NOMAD processes entries in a fork of the worker; the inherited Temporal
+    runtime refuses to create a client there."""
+    temporal.forked_runtime = True
+
+    measure('new', NEW, stored_chip('old', OLD))
+
+    assert temporal.runtime_resets == 1
+    assert temporal.started_ids == ['age-refresh-chip-chip.after-moke_upload']
