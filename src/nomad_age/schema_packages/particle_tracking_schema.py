@@ -111,6 +111,27 @@ class AGE_Measurement(Measurement):
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
         self.list_samples_by_kind(logger)
+        self.name_instruments(logger)
+
+    def name_instruments(self, logger) -> None:
+        """Name each instrument after the entry it links, so the search apps can
+        show and filter by e.g. 'Zeiss Epiplan 20x/0.40 HD' instead of the lab_id.
+
+        Falls back to the lab_id if the entry has no name; a name set by hand
+        (other than the lab_id) is kept.
+        """
+        for instrument in self.instruments:
+            if instrument.name and instrument.name != instrument.lab_id:
+                continue
+            try:
+                target = resolved(instrument.reference)
+            except Exception as e:
+                logger.warning(
+                    f'Instrument {instrument.lab_id} not named: entry not loaded: {e!r}'
+                )
+                continue
+            name = getattr(target, 'name', None) if target is not None else None
+            instrument.name = name or instrument.lab_id
 
     def list_samples_by_kind(self, logger) -> None:
         """Fill particles, chips and spacer_thickness from the entries that

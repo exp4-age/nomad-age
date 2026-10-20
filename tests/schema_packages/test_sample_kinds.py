@@ -247,3 +247,30 @@ def test_values_from_samples_are_recomputed_on_each_normalize(
     assert names(archive.data.particles) == ['M270 batch 3']
     assert names(archive.data.chips) == []
     assert archive.data.spacer_thickness is None
+
+
+@pytest.mark.parametrize('entry_type', RECORDINGS)
+def test_instruments_are_named_after_their_entry(
+    tmp_path, process_entry, stored_archives_context, caplog, entry_type
+):
+    instruments = [
+        # NOMAD names it after the lab_id; the entry name replaces that
+        {'lab_id': 'OBJ-20x', 'reference': reference(UPLOAD_ID, 'objective')},
+        # a name set by hand is kept
+        {
+            'name': 'my objective',
+            'lab_id': 'OBJ-20x',
+            'reference': reference(UPLOAD_ID, 'objective'),
+        },
+        # entry has no name: the lab_id stays
+        {'lab_id': '2023_0325_1', 'reference': reference(UPLOAD_ID, 'unnamed_chip')},
+    ]
+    write_entry(
+        tmp_path, 'rec.archive.yaml', entry_type, name='rec', instruments=instruments
+    )
+    context = stored_archives_context(tmp_path, ARCHIVES)
+
+    data = process_entry(tmp_path, 'rec.archive.yaml', context=context).data
+
+    assert names(data.instruments) == ['Objective 20x', 'my objective', '2023_0325_1']
+    assert not warnings(caplog)

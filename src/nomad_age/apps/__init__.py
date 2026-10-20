@@ -384,7 +384,7 @@ def particle_transport_app(
                 format=Format(decimals=0, mode='standard'),
             ),
             Column(
-                search_quantity=q('instruments[*].lab_id'),
+                search_quantity=q('instruments[*].name'),
                 title='Instruments',
                 selected=True,
             ),
@@ -443,6 +443,10 @@ def particle_transport_app(
                     title='Microscope',
                     items=[
                         MenuItemTerms(
+                            search_quantity=q('instruments.name'),
+                            title='Instruments',
+                        ),
+                        MenuItemTerms(
                             search_quantity=q('instruments.lab_id'),
                             title='Instrument ID',
                         ),
@@ -498,7 +502,7 @@ def particle_transport_app(
                     ),
                 ),
                 WidgetTerms(
-                    search_quantity=q('instruments.lab_id'),
+                    search_quantity=q('instruments.name'),
                     title='Instruments',
                     layout=widget_layout(
                         sm=(0, 5, 12, 5),
