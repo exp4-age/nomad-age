@@ -6,11 +6,7 @@ from nomad.datamodel.metainfo.basesections import BaseSection
 
 from nomad_age import apps
 from nomad_age.schema_packages.age_schema import (
-    AGE_CoatedSample,
     AGE_InventoryItem,
-    AGE_Sample,
-    AGE_SampleItem,
-    AGE_SpinCoating,
 )
 
 APPS = [
@@ -111,9 +107,12 @@ def test_apps_lock_to_one_value_only():
             assert len(values) == 1
 
 
-def test_sample_app_types_derive_from_the_marker():
-    for section in (AGE_Sample, AGE_CoatedSample, AGE_SpinCoating):
-        assert issubclass(section, AGE_SampleItem)
-    assert apps.age_samples.app.filters_locked == {
-        'section_defs.definition_qualified_name': [apps.sample_item_schema]
+def test_sample_app_shows_chips_only():
+    """Coated chips and spin coatings are reached from their chip (Referenced
+    by), not listed in the samples app."""
+    app = apps.age_samples.app
+    assert app.filters_locked == {
+        'section_defs.definition_qualified_name': [apps.sample_schema]
     }
+    for schema in (apps.coated_sample_schema, apps.spin_coating_schema):
+        assert f'*#{schema}' not in app.search_quantities.include

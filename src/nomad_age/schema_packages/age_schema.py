@@ -39,11 +39,6 @@ class AGE_InventoryItem(ArchiveSection):
     """
 
 
-class AGE_SampleItem(ArchiveSection):
-    """Marks the entries of the AGE Samples app (chips, coated chips, spin
-    coatings); see AGE_InventoryItem for why."""
-
-
 class AGE_RawFile(EntryData):
     """An original data file of an upload, kept for archival. The parser writes its
     data to an editable entry file (processed_archive) and fingerprints the file
@@ -116,7 +111,7 @@ class AGE_RawFile_Reference(EntryData):
     )
 
 
-class AGE_Sample(CompositeSystem, EntryData, AGE_SampleItem):
+class AGE_Sample(CompositeSystem, EntryData):
     m_def = Section(label='AGE Sample', description='AGE sample data')
 
     state = Quantity(
@@ -244,7 +239,7 @@ class AGE_Objective(Instrument, EntryData, AGE_InventoryItem):
     )
 
 
-class AGE_CoatedSample(CompositeSystem, EntryData, AGE_SampleItem):
+class AGE_CoatedSample(CompositeSystem, EntryData):
     """A chip in one coated state: the chip with one spacer layer on it."""
 
     m_def = Section(
@@ -350,7 +345,7 @@ def resolved(reference):
     return reference
 
 
-class AGE_SpinCoating(Process, EntryData, AGE_SampleItem):
+class AGE_SpinCoating(Process, EntryData):
     """Spin coating of a spacer layer on a chip."""
 
     m_def = Section(
