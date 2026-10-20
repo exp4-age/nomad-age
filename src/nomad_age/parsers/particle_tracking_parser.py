@@ -19,7 +19,7 @@ from nomad.datamodel.metainfo.plot import PlotlyFigure
 from nomad.parsing import MatchingParser
 from PIL import Image
 
-from nomad_age.schema_packages.age_schema import AGE_RawFile, AGE_Sample
+from nomad_age.schema_packages.age_schema import AGE_RawFile
 from nomad_age.schema_packages.particle_tracking_schema import (
     FROM_SAMPLES,
     AGE_FocusSweep,
@@ -30,11 +30,11 @@ from nomad_age.utils.fingerprint import file_fingerprint
 from nomad_age.utils.utils import (
     YAML_LOADER,
     create_archive,
-    find_existing_AGE_sample,
+    find_chip_reference,
     get_entry_id,
     get_hash_ref,
-    get_reference,
     lab_time_to_utc,
+    normalize_sample_id,
     update_entry,
 )
 
@@ -474,27 +474,15 @@ def build_video_entry(path: str, rel_path: str) -> AGE_ParticleTransportVideo:
 
 
 def link_AGE_samples(entry, lab_ids: list, archive: EntryArchive, logger) -> None:
-    """Reference the AGE samples with the given lab ids; create missing ones."""
-    main_author = archive.metadata.main_author
-    # Without a user id the search only sees published samples.
-    user_id = main_author.user_id if main_author else None
-    for lab_id in lab_ids:
-        hits = find_existing_AGE_sample(lab_id, user_id=user_id).data
-        if len(hits) > 1:
-            logger.error(
-                f'Found {len(hits)} AGE samples with lab_id {lab_id}; not linked.'
-            )
-            continue
-        if hits:
-            # The sample may live in another upload.
-            reference = get_reference(hits[0]['upload_id'], hits[0]['entry_id'])
-            reference += '#data'
-        else:
-            sample_file = f'{lab_id}.archive.yaml'
-            create_archive(AGE_Sample(name=lab_id, lab_id=lab_id), archive, sample_file)
-            reference = get_hash_ref(archive.metadata.upload_id, sample_file)
+    """Reference the chips (AGE samples) with the given lab ids, which may live in
+    another upload; missing chips are only reported, never created."""
+    for lab_id in dict.fromkeys(map(normalize_sample_id, lab_ids)):
         entry.samples.append(
-            CompositeSystemReference(name=lab_id, lab_id=lab_id, reference=reference)
+            CompositeSystemReference(
+                name=lab_id,
+                lab_id=lab_id,
+                reference=find_chip_reference(lab_id, archive, logger),
+            )
         )
 
 

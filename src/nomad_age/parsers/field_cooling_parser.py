@@ -10,25 +10,25 @@ from nomad.datamodel.metainfo.plot import PlotlyFigure
 from nomad.parsing import MatchingParser
 from plotly.subplots import make_subplots
 
-from nomad_age.schema_packages.age_schema import (
-    AGE_RawFile,
-    AGE_Sample,
-    AGE_Sample_Reference,
-)
+from nomad_age.schema_packages.age_schema import AGE_RawFile, AGE_Sample_Reference
 from nomad_age.schema_packages.field_cooling_schema import AGE_FieldCooling
 from nomad_age.utils.fingerprint import file_fingerprint
 from nomad_age.utils.utils import (
     create_archive,
-    find_existing_AGE_sample,
+    find_chip_reference,
     get_entry_id,
     get_hash_ref,
     lab_time_to_utc,
+    normalize_sample_id,
     update_entry,
 )
 
 configuration = config.get_plugin_entry_point(
     'nomad_age.parsers:field_cooling_parser_entry_point'
 )
+
+# Sample ids such as 2023_0418, 2023_0418_1 or the broken chip 2023_0418_1_2.
+SAMPLE_ID_RE = re.compile(r'\d{4}_\d{4}(?:_\d+)*')
 
 
 def parse_date(date_str: str) -> datetime:
@@ -130,13 +130,13 @@ class FieldCoolingParser(MatchingParser):
         for line in content.split('\n'):
             if 'Probenname:' in line:
                 lineend = line.split(':')[1].strip()
-                sample_names = re.findall(r'\d{4}_\d{4}_?\d?', lineend)
+                sample_names = SAMPLE_ID_RE.findall(lineend)
                 if not sample_names:
                     # If there is no sample name found, it's probably only a comment
                     entry.description = line.split(':')[1].strip()
                 else:
                     # Ceck if there is more text than just the sample names
-                    rest = re.sub(r'\d{4}_\d{4}_?\d?|,', '', lineend)
+                    rest = SAMPLE_ID_RE.sub('', lineend).replace(',', '')
                     if (
                         len(rest.strip()) > 0
                     ):  # if there is more than just the sample, add it to description
@@ -194,29 +194,15 @@ class FieldCoolingParser(MatchingParser):
                 PlotlyFigure(label='Field Cooling Plot', figure=fig.to_plotly_json())
             ]
 
-        # Create AGE_Sample_Reference entries for each sample
-        # If it doesn't exist, create a new AGE_Sample
-        for id in sample_names:
-            existing_sample = find_existing_AGE_sample(id)
-            if len(existing_sample.data) == 1:  # already exists
-                entry.samples.append(
-                    AGE_Sample_Reference(
-                        reference=get_hash_ref(uid, f'{id}.archive.yaml')
-                    )
+        # Chips live in the AGE Samples upload: link them, never create them.
+        for lab_id in dict.fromkeys(map(normalize_sample_id, sample_names)):
+            entry.samples.append(
+                AGE_Sample_Reference(
+                    name=lab_id,
+                    lab_id=lab_id,
+                    reference=find_chip_reference(lab_id, archive, logger),
                 )
-            elif len(existing_sample.data) == 0:  # does not exist
-                SampleArchive = AGE_Sample(name=id, lab_id=id)
-                create_archive(
-                    SampleArchive,
-                    archive,
-                    f'{id}.archive.yaml',
-                )
-                sample = get_hash_ref(uid, f'{id}.archive.yaml')
-                entry.samples.append(
-                    AGE_Sample_Reference(name=id, lab_id=id, reference=sample)
-                )
-            else:
-                raise ValueError('Two samples have the same ID. Something went wrong')
+            )
 
         rel_mainfile = archive.metadata.mainfile or os.path.basename(mainfile)
         archive.data = AGE_RawFile(
@@ -228,6 +214,9 @@ class FieldCoolingParser(MatchingParser):
         entry.raw_file = get_hash_ref(uid, rel_mainfile)
         new_entry_created = create_archive(entry, archive, entry_file_name)
         if not new_entry_created:
-            new_entry = update_entry(entry, eid, archive, logger)
+            # The samples are parsed from the log: stale references go.
+            new_entry = update_entry(
+                entry, eid, archive, logger, parsed_wins=('samples',)
+            )
             if new_entry is not None:
                 create_archive(new_entry, archive, entry_file_name, overwrite=True)
