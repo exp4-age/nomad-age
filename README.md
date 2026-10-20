@@ -92,6 +92,30 @@ The inventory entry types are listed once, in `INVENTORY_SCHEMAS` in
 is added there to appear in the app, plus columns or menu items for its own
 quantities.
 
+## Magnetisation measurements on chips
+
+L-MOKE files (`*LMOKE*.txt`) are `LMOKEandVMOKESchema` entries: `technique`
+(L-MOKE or V-MOKE, from the device or file name), `measurement_time` (the lab
+time in the file name, Europe/Berlin) and the plot of magnetization (else
+intensity) against field. Their `samples` link the chip of the `Sample` line in
+the AGE Samples upload (`2023_0418` means `2023_0418_1`); a missing chip is a
+warning, chips are never created. All magnetisation entry types derive from
+`AGE_MagnetisationMeasurement`, so a chip lists them under "Referenced by".
+
+A chip shows the plot of its newest magnetisation measurement (that its main
+author sees) with `latest_magnetisation_measurement`, `_time` and `_technique`,
+refreshed on every processing of the chip. Processing a measurement that is
+newer than the one its chip shows (or is that one) reprocesses the chip entry
+shortly after, once the measurement's upload is done (NOMAD with Temporal only).
+After deleting measurements, or if a refresh was missed, run in the Oasis
+container
+
+```sh
+python -m nomad_age.scripts.refresh_chip_plots [--dry-run]
+```
+
+which reprocesses the chips that do not show their newest measurement.
+
 
 ## Development
 

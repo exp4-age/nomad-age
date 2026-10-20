@@ -1,11 +1,21 @@
 import re
+from datetime import datetime
 
 import numpy
 from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.parsing import MatchingParser
 from nomad.parsing.file_parser import DataTextParser, Quantity, TextParser
 
-from nomad_age.schema_packages.LMOKEandVMOKESchema import LMOKEandVMOKESchema
+from nomad_age.schema_packages.age_schema import AGE_Sample_Reference
+from nomad_age.schema_packages.LMOKEandVMOKESchema import (
+    LMOKEandVMOKESchema,
+    moke_technique,
+)
+from nomad_age.utils.utils import (
+    find_chip_reference,
+    lab_time_to_utc,
+    normalize_sample_id,
+)
 
 
 def assign_as_single_string(value):
@@ -176,6 +186,14 @@ class LMOKEParser(MatchingParser):
             else:
                 lmokeandvmokeschema.comment = 'None'
 
+        # The schema stores fields in kA/m, the unit the L-MOKE software writes.
+        field_unit = re.search(r'^#\s*H\s*\(([^)]*)\)', content, re.MULTILINE)
+        if field_unit and field_unit.group(1).strip() != 'kA/m':
+            logger.warning(
+                f'Field column is in {field_unit.group(1).strip()}, not kA/m; '
+                'field values are stored as kA/m and are wrong.'
+            )
+
         # Process the experimental data using DataTextParser
         experimental_data_parser.mainfile = tmp_data_file
         experimental_data_parser.parse()
@@ -186,6 +204,23 @@ class LMOKEParser(MatchingParser):
         lmokeandvmokeschema.intensity = experimental_data_parser.get(
             'Longitudinal detector signal'
         )
+
+        lmokeandvmokeschema.technique = moke_technique(
+            lmokeandvmokeschema.device, mainfile
+        )
+        lmokeandvmokeschema.measurement_time = lab_time_to_utc(
+            datetime.strptime(lmokeandvmokeschema.datetime, '%Y-%m-%d_%H-%M-%S')
+        )
+        # Chips live in the AGE Samples upload: link them, never create them.
+        if lmokeandvmokeschema.sample:
+            lab_id = normalize_sample_id(str(lmokeandvmokeschema.sample))
+            lmokeandvmokeschema.samples.append(
+                AGE_Sample_Reference(
+                    name=lab_id,
+                    lab_id=lab_id,
+                    reference=find_chip_reference(lab_id, archive, logger),
+                )
+            )
 
         archive.data = lmokeandvmokeschema
 

@@ -1,4 +1,6 @@
 import os
+from datetime import datetime
+from typing import Optional
 
 from nomad.config import config
 from nomad.datamodel.data import ArchiveSection, EntryData
@@ -18,10 +20,27 @@ from nomad.datamodel.metainfo.basesections import (
     Instrument,
     Process,
 )
+from nomad.datamodel.metainfo.plot import PlotlyFigure, PlotSection
 from nomad.datamodel.metainfo.workflow import Link
-from nomad.metainfo import Datetime, MEnum, MProxy, Quantity, SchemaPackage, Section
+from nomad.metainfo import (
+    Datetime,
+    MEnum,
+    MProxy,
+    Quantity,
+    Reference,
+    SchemaPackage,
+    Section,
+    SectionProxy,
+    SubSection,
+)
 
-from nomad_age.utils.utils import get_referencing_entries
+from nomad_age.utils import chip_refresh
+from nomad_age.utils.utils import (
+    LAB_TIMEZONE,
+    get_reference,
+    get_referencing_entries,
+    newest_magnetisation_measurement,
+)
 
 configuration = config.get_plugin_entry_point(
     'nomad_age.schema_packages:age_schema_entry_point'
@@ -111,7 +130,11 @@ class AGE_RawFile_Reference(EntryData):
     )
 
 
-class AGE_Sample(CompositeSystem, EntryData):
+# Label of the chip figure of its newest magnetisation measurement.
+MAGNETISATION_FIGURE_LABEL = 'Newest magnetisation measurement'
+
+
+class AGE_Sample(PlotSection, CompositeSystem, EntryData):
     m_def = Section(label='AGE Sample', description='AGE sample data')
 
     state = Quantity(
@@ -132,8 +155,30 @@ class AGE_Sample(CompositeSystem, EntryData):
         ),
     )
 
+    latest_magnetisation_measurement = Quantity(
+        type=Reference(SectionProxy('AGE_MagnetisationMeasurement')),
+        description=(
+            'The newest magnetisation measurement of the chip, whose plot the chip '
+            'shows. Set on processing; all measurements are under Referenced by.'
+        ),
+    )
+
+    latest_magnetisation_time = Quantity(
+        type=Datetime,
+        description='Time of the newest magnetisation measurement. Set on processing.',
+    )
+
+    latest_magnetisation_technique = Quantity(
+        type=str,
+        description=(
+            'Technique of the newest magnetisation measurement, e.g. L-MOKE. Set on '
+            'processing.'
+        ),
+    )
+
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
+        self.show_newest_magnetisation(archive, logger)
         referencing = get_referencing_entries(self)
         if not referencing:
             return
@@ -147,6 +192,54 @@ class AGE_Sample(CompositeSystem, EntryData):
             self.state = 'after FC'
         else:
             pass  # TODO: Either this or maybe set to "as made"?
+
+    def show_newest_magnetisation(self, archive, logger):
+        """Show the plot of the newest magnetisation measurement that references
+        the chip (in any upload its main author sees), replacing the plot and
+        latest_* values that the chip shows; on errors, keep them."""
+        metadata = archive.metadata
+        try:
+            author = metadata.main_author
+            newest = newest_magnetisation_measurement(
+                metadata.entry_id, author.user_id if author else None
+            )
+            figure = None
+            if newest is not None:
+                measurement = archive.m_context.load_archive(
+                    newest['entry_id'], newest['upload_id'], None
+                ).data
+                figure = measurement.magnetisation_figure()
+        except Exception as e:
+            logger.warning(f'Could not show the newest magnetisation plot: {e!r}')
+            return
+        # Users save chips in the ELN with the values of the last processing.
+        for index in reversed(range(len(self.figures))):
+            if self.figures[index].label == MAGNETISATION_FIGURE_LABEL:
+                self.m_remove_sub_section(PlotSection.figures, index)
+        if newest is None:
+            self.latest_magnetisation_measurement = None
+            self.latest_magnetisation_time = None
+            self.latest_magnetisation_technique = None
+        else:
+            self.latest_magnetisation_measurement = (
+                f'{get_reference(newest["upload_id"], newest["entry_id"])}#data'
+            )
+            self.latest_magnetisation_time = newest['measurement_time']
+            self.latest_magnetisation_technique = (
+                measurement.technique or newest['technique']
+            )
+            if figure is None:
+                logger.warning('The newest magnetisation measurement has no plot.')
+            else:
+                self.figures.append(
+                    PlotlyFigure(label=MAGNETISATION_FIGURE_LABEL, figure=figure)
+                )
+        try:
+            chip_refresh.postpone_while_source_busy(
+                metadata.upload_id, metadata.entry_id, logger
+            )
+        except Exception as e:
+            logger.warning(f'Could not postpone the chip plot refresh: {e!r}')
 
 
 class AGE_Sample_Reference(EntityReference):
@@ -162,6 +255,49 @@ class AGE_Sample_Reference(EntityReference):
             label='Age Sample Reference',
         ),
     )
+
+
+class AGE_MagnetisationMeasurement(ArchiveSection):
+    """Base of all magnetisation measurements of chips (L-MOKE, V-MOKE, VSM, Kerr
+    microscopy). A chip finds them by this section and shows the plot of the
+    newest one; every entry type of such a measurement derives from it."""
+
+    samples = SubSection(
+        section_def=AGE_Sample_Reference,
+        repeats=True,
+        description='The measured chips, in the AGE Samples upload.',
+    )
+
+    measurement_time = Quantity(
+        type=Datetime,
+        description='Time of the measurement.',
+    )
+
+    technique = Quantity(
+        type=str,
+        description='Measurement technique, e.g. L-MOKE or V-MOKE.',
+    )
+
+    def magnetisation_title(self) -> str:
+        """Short title of the plot: technique and lab time of the measurement."""
+        parts = [self.technique or 'Magnetisation']
+        if self.measurement_time is not None:
+            parts.append(f'{local_time(self.measurement_time):%Y-%m-%d %H:%M}')
+        return ', '.join(parts)
+
+    def magnetisation_figure(self) -> Optional[dict]:
+        """Plotly figure (JSON dict) that chips show of this measurement; None if
+        there is nothing to plot. Each measurement type overrides it."""
+        return None
+
+    def normalize(self, archive, logger):
+        super().normalize(archive, logger)
+        chip_refresh.request_chip_refreshes(self, archive, logger)
+
+
+def local_time(time: datetime) -> datetime:
+    """`time` in the time zone of the lab."""
+    return time.astimezone(LAB_TIMEZONE)
 
 
 class AGE_Particles(CompositeSystem, EntryData, AGE_InventoryItem):

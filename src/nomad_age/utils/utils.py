@@ -19,8 +19,19 @@ LAB_TIMEZONE = ZoneInfo('Europe/Berlin')
 
 # Chips: one central upload holds all AGE_Sample entries; parsers only link them.
 AGE_SAMPLE_SCHEMA = 'nomad_age.schema_packages.age_schema.AGE_Sample'
+# Base section of all magnetisation measurements (L-MOKE, V-MOKE, ...); NOMAD indexes
+# the base sections of an entry's data, so one filter finds every technique.
+AGE_MAGNETISATION_SCHEMA = (
+    'nomad_age.schema_packages.age_schema.AGE_MagnetisationMeasurement'
+)
+# A chip shows its newest measurement; it has far fewer than this many.
+MAX_MAGNETISATION_MEASUREMENTS = 1000
 # A sputter run <year>_<number>; its samples are <run>_1, <run>_2, ...
 SPUTTER_RUN_RE = re.compile(r'\d{4}_\d{4}')
+# A reference to an entry of an upload, as get_reference writes it.
+REFERENCE_RE = re.compile(
+    r'\.\./uploads/(?P<upload_id>[^/]+)/archive/(?P<entry>[^/#]+)'
+)
 
 
 def get_reference(upload_id, entry_id):
@@ -29,6 +40,27 @@ def get_reference(upload_id, entry_id):
 
 def get_entry_id(upload_id, filename):
     return hash(upload_id, filename)
+
+
+def parse_reference(reference) -> Optional[tuple]:
+    """(upload id, entry id) of a reference to an entry such as get_reference
+    writes it, given as text or as unresolved reference value; None otherwise."""
+    url = reference if isinstance(reference, str) else None
+    if url is None:
+        url = getattr(reference, 'm_proxy_value', None)
+    match = REFERENCE_RE.match(url) if isinstance(url, str) else None
+    return (match['upload_id'], match['entry']) if match else None
+
+
+def as_utc(value) -> Optional[datetime]:
+    """A datetime or ISO text as timezone aware datetime; naive times are UTC."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value
 
 
 def get_hash_ref(upload_id, filename):
@@ -276,3 +308,57 @@ def get_referencing_entries(archive: ArchiveSection) -> list:
     entry_list = results.data
 
     return entry_list
+
+
+def _magnetisation_summary(hit: dict) -> dict:
+    """entry_id, upload_id, measurement_time and technique of a search hit of a
+    magnetisation measurement; the data quantities come from its search quantities,
+    which NOMAD indexes with the definitions of the base section."""
+    values = {}
+    for quantity in hit.get('search_quantities') or []:
+        definition = quantity.get('definition') or ''
+        if definition.startswith(f'{AGE_MAGNETISATION_SCHEMA}.'):
+            name = definition[len(AGE_MAGNETISATION_SCHEMA) + 1 :]
+            values[name] = quantity.get('datetime_value', quantity.get('str_value'))
+    return {
+        'entry_id': hit['entry_id'],
+        'upload_id': hit['upload_id'],
+        'measurement_time': as_utc(values.get('measurement_time')),
+        'technique': values.get('technique'),
+    }
+
+
+def find_magnetisation_measurements(chip_entry_id: str, user_id=None) -> list:
+    """The magnetisation measurements that reference the chip entry `chip_entry_id`
+    and that the user with `user_id` sees, as _magnetisation_summary dicts."""
+    from nomad.search import MetadataPagination, MetadataRequired, search
+
+    results = search(
+        owner='visible',
+        user_id=user_id,
+        query={
+            'entry_references.target_entry_id': chip_entry_id,
+            'section_defs.definition_qualified_name': AGE_MAGNETISATION_SCHEMA,
+        },
+        # a wildcard returns the indexed data quantities; NOMAD validates only
+        # include patterns without one
+        required=MetadataRequired(
+            include=['entry_id', 'upload_id', 'search_quantities*']
+        ),
+        pagination=MetadataPagination(page_size=MAX_MAGNETISATION_MEASUREMENTS),
+    )
+    return [_magnetisation_summary(hit) for hit in results.data]
+
+
+def newest_magnetisation_measurement(chip_entry_id: str, user_id=None):
+    """The newest (by measurement_time, then entry id) magnetisation measurement of
+    the chip entry, see find_magnetisation_measurements; None if it has none with a
+    measurement time."""
+    measurements = [
+        m
+        for m in find_magnetisation_measurements(chip_entry_id, user_id)
+        if m['measurement_time'] is not None
+    ]
+    if not measurements:
+        return None
+    return max(measurements, key=lambda m: (m['measurement_time'], m['entry_id']))

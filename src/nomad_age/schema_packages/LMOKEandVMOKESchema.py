@@ -1,9 +1,35 @@
-import plotly.express as px
+import os
+from typing import Optional
+
+import numpy as np
+import plotly.graph_objects as go
 from nomad.datamodel.data import Schema
 from nomad.datamodel.metainfo.plot import PlotlyFigure, PlotSection
 from nomad.metainfo import Package, Quantity, Section
 
+from nomad_age.schema_packages.age_schema import AGE_MagnetisationMeasurement
+
 lmoke_vmoke_package = Package(name='lmoke_vmoke_nomadmetainfo_json', description='None')
+
+
+def moke_technique(device: Optional[str], mainfile: Optional[str]) -> str:
+    """L-MOKE or V-MOKE, from the device named in the file, else from the file
+    name; L-MOKE if neither tells."""
+    for text in (device, os.path.basename(mainfile or '')):
+        text = (text or '').upper()
+        if 'VMOKE' in text:
+            return 'V-MOKE'
+        if 'LMOKE' in text:
+            return 'L-MOKE'
+    return 'L-MOKE'
+
+
+def magnitudes(values, unit=None) -> list:
+    """Plain float list of an array quantity value, in `unit` if it has units."""
+    if unit is not None and hasattr(values, 'to'):
+        values = values.to(unit)
+    return np.asarray(getattr(values, 'magnitude', values), dtype=float).tolist()
+
 
 """
 Quantities to be defined:
@@ -62,7 +88,7 @@ detector signal (only for VMOKE).
 """
 
 
-class LMOKEandVMOKESchema(Schema, PlotSection):
+class LMOKEandVMOKESchema(Schema, PlotSection, AGE_MagnetisationMeasurement):
     m_def = Section()
 
     ###### Device / Sample specfic + uuid
@@ -152,17 +178,15 @@ class LMOKEandVMOKESchema(Schema, PlotSection):
     H_start = Quantity(
         type=float,
         description=(
-            'Starting field of the measurement in **mT**, kA/m or Oe. '
-            'Typically larger than Hend'
-        ),  # old files may use kA/m
-        unit='mT',
+            'Starting field of the measurement in kA/m. Typically larger than Hend'
+        ),
+        unit='kA/m',
     )
 
     H_end = Quantity(
         type=float,
-        description='Final field of the first branch in **mT**, kA/m or Oe',
-        # old files may use kA/m
-        unit='mT',
+        description='Final field of the first branch in kA/m',
+        unit='kA/m',
     )
 
     pts_per_branch = Quantity(
@@ -209,10 +233,8 @@ class LMOKEandVMOKESchema(Schema, PlotSection):
     ###### Optional metadata
     H_stop = Quantity(
         type=float,
-        description=(
-            'Stopping field of MinorLoops/FORC measurements in **mT**, kA/m or Oe.'
-        ),
-        unit='mT',
+        description=('Stopping field of MinorLoops/FORC measurements in kA/m.'),
+        unit='kA/m',
     )
 
     wait_time = Quantity(
@@ -282,19 +304,26 @@ class LMOKEandVMOKESchema(Schema, PlotSection):
         description='True if training effect elimination is applied',  # Only VMOKE
     )
 
-    def generate_hysteresis_plot(self, x_name='magnetic_field', y_name='intensity'):
-        x = self[x_name]
-        y = self[y_name]
+    def magnetisation_title(self) -> str:
+        title = super().magnetisation_title()
+        return f'{title}, {self.sample_state}' if self.sample_state else title
 
-        if y_name == 'intensity':
-            yaxis_title = 'Intensity [arb. u.]'
-        elif y_name == 'magnetization':
-            yaxis_title = 'Magnetization [arb. u.]'
-
-        hys_plot = px.line(x=x, y=y)
-
-        hys_plot.update_layout(
-            xaxis_title='Magnetic Field [mT]',
+    def magnetisation_figure(self) -> Optional[dict]:
+        """Magnetization (else intensity) against the magnetic field."""
+        if self.magnetic_field is None:
+            return None
+        if self.magnetization is not None:
+            y, yaxis_title = magnitudes(self.magnetization), 'Magnetization [arb. u.]'
+        elif self.intensity is not None:
+            y, yaxis_title = magnitudes(self.intensity, 'V'), 'Intensity [V]'
+        else:
+            return None
+        figure = go.Figure(
+            go.Scatter(x=magnitudes(self.magnetic_field, 'kA/m'), y=y, mode='lines')
+        )
+        figure.update_layout(
+            title=self.magnetisation_title(),
+            xaxis_title='H [kA/m]',
             yaxis_title=yaxis_title,
             xaxis_showgrid=True,
             xaxis_zeroline=True,
@@ -305,10 +334,12 @@ class LMOKEandVMOKESchema(Schema, PlotSection):
             yaxis_zerolinecolor='black',
             yaxis_zerolinewidth=2,
         )
+        return figure.to_plotly_json()
 
-        hys_plot_json = hys_plot.to_plotly_json()
-
-        self.figures.append(PlotlyFigure(figure=hys_plot_json))
+    def generate_hysteresis_plot(self):
+        figure = self.magnetisation_figure()
+        if figure is not None:
+            self.figures = [PlotlyFigure(label='Hysteresis loop', figure=figure)]
 
     ###### Measurement Data
     # Maybe instead of defining all these quantities together, a single quantity for
@@ -321,8 +352,8 @@ class LMOKEandVMOKESchema(Schema, PlotSection):
     magnetic_field = Quantity(
         type=float,
         shape=['*'],  # either [longitudinal, transversal, total] or [longitudinal]
-        description='Magnetic fields / field components in **mT**, kA/m or Oe.',
-        unit='mT',
+        description='Magnetic fields / field components in kA/m.',
+        unit='kA/m',
     )
 
     # Intensity
@@ -349,27 +380,27 @@ class LMOKEandVMOKESchema(Schema, PlotSection):
     # Coercivity
     HC = Quantity(
         type=float,
-        description='Coercivity in **mT**, kA/m or Oe.',
-        unit='mT',
+        description='Coercivity in kA/m.',
+        unit='kA/m',
     )
 
     dHC = Quantity(
         type=float,
-        description='Uncertainty of the coercivity in **mT**, kA/m or Oe.',
-        unit='mT',
+        description='Uncertainty of the coercivity in kA/m.',
+        unit='kA/m',
     )
 
     # Exchange bias
     HEB = Quantity(
         type=float,
-        description='Exchange bias in **mT**, kA/m or Oe.',
-        unit='mT',
+        description='Exchange bias in kA/m.',
+        unit='kA/m',
     )
 
     dHEB = Quantity(
         type=float,
-        description='Uncertainty of the exchange bias in **mT**, kA/m or Oe.',
-        unit='mT',
+        description='Uncertainty of the exchange bias in kA/m.',
+        unit='kA/m',
     )
 
     # Magnetization saturation
@@ -422,15 +453,15 @@ class LMOKEandVMOKESchema(Schema, PlotSection):
     saturation_fields = Quantity(
         type=float,
         shape=[2],
-        description='Saturation fields in **mT**, kA/m or Oe.',
-        unit='mT',
+        description='Saturation fields in kA/m.',
+        unit='kA/m',
     )
 
     dsaturation_fields = Quantity(
         type=float,
         shape=[2],
-        description='Uncertainty of the saturation fields in **mT**, kA/m or Oe.',
-        unit='mT',
+        description='Uncertainty of the saturation fields in kA/m.',
+        unit='kA/m',
     )
 
     # Slope at HC
