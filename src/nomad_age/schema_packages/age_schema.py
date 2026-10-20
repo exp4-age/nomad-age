@@ -30,6 +30,20 @@ configuration = config.get_plugin_entry_point(
 m_package = SchemaPackage(name='age_schema')
 
 
+class AGE_InventoryItem(ArchiveSection):
+    """Marks lab equipment and consumables (particle batches, objectives, ...).
+
+    The AGE Inventory app locks to this section: NOMAD indexes the base sections
+    of an entry's data, and a locked filter with several types matches only
+    entries of all of them (none).
+    """
+
+
+class AGE_SampleItem(ArchiveSection):
+    """Marks the entries of the AGE Samples app (chips, coated chips, spin
+    coatings); see AGE_InventoryItem for why."""
+
+
 class AGE_RawFile(EntryData):
     """An original data file of an upload, kept for archival. The parser writes its
     data to an editable entry file (processed_archive) and fingerprints the file
@@ -102,7 +116,7 @@ class AGE_RawFile_Reference(EntryData):
     )
 
 
-class AGE_Sample(CompositeSystem, EntryData):
+class AGE_Sample(CompositeSystem, EntryData, AGE_SampleItem):
     m_def = Section(label='AGE Sample', description='AGE sample data')
 
     state = Quantity(
@@ -155,7 +169,7 @@ class AGE_Sample_Reference(EntityReference):
     )
 
 
-class AGE_Particles(CompositeSystem, EntryData):
+class AGE_Particles(CompositeSystem, EntryData, AGE_InventoryItem):
     """Particles of one batch; measurements link it under samples."""
 
     m_def = Section(
@@ -197,7 +211,7 @@ class AGE_Particles(CompositeSystem, EntryData):
     )
 
 
-class AGE_Objective(Instrument, EntryData):
+class AGE_Objective(Instrument, EntryData, AGE_InventoryItem):
     """Microscope objective; measurements link it under instruments."""
 
     m_def = Section(
@@ -230,7 +244,7 @@ class AGE_Objective(Instrument, EntryData):
     )
 
 
-class AGE_CoatedSample(CompositeSystem, EntryData):
+class AGE_CoatedSample(CompositeSystem, EntryData, AGE_SampleItem):
     """A chip in one coated state: the chip with one spacer layer on it."""
 
     m_def = Section(
@@ -336,7 +350,7 @@ def resolved(reference):
     return reference
 
 
-class AGE_SpinCoating(Process, EntryData):
+class AGE_SpinCoating(Process, EntryData, AGE_SampleItem):
     """Spin coating of a spacer layer on a chip."""
 
     m_def = Section(
