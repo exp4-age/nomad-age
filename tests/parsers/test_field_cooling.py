@@ -163,12 +163,23 @@ def test_broken_chips_keep_their_ids(upload, searches):
     assert 'description' not in entry_data(upload)
 
 
+class KwargsLogger:
+    """stdlib logger that accepts structlog-style keyword arguments like NOMAD's."""
+
+    def __init__(self, logger):
+        self._logger = logger
+
+    def __getattr__(self, level):
+        log = getattr(self._logger, level)
+        return lambda msg, *args, **kwargs: log(msg, *args)
+
+
 def test_missing_chips_are_reported_not_created(upload, searches, caplog):
     set_sample_line(upload, '2026_0167')
     searches.missing.add('2026_0167_1')
 
     with caplog.at_level(logging.WARNING):
-        parse(upload, logger=logging.getLogger(__name__))
+        parse(upload, logger=KwargsLogger(logging.getLogger(__name__)))
 
     assert sample_refs(upload) == [{'name': '2026_0167_1', 'lab_id': '2026_0167_1'}]
     entry_files = {path.name for path in upload.glob('*.archive.yaml')}
