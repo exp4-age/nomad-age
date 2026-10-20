@@ -178,17 +178,15 @@ class LMOKEandVMOKESchema(Schema, PlotSection, AGE_MagnetisationMeasurement):
     H_start = Quantity(
         type=float,
         description=(
-            'Starting field of the measurement in **mT**, kA/m or Oe. '
-            'Typically larger than Hend'
-        ),  # old files may use kA/m
-        unit='mT',
+            'Starting field of the measurement in kA/m. Typically larger than Hend'
+        ),
+        unit='kA/m',
     )
 
     H_end = Quantity(
         type=float,
-        description='Final field of the first branch in **mT**, kA/m or Oe',
-        # old files may use kA/m
-        unit='mT',
+        description='Final field of the first branch in kA/m',
+        unit='kA/m',
     )
 
     pts_per_branch = Quantity(
@@ -235,10 +233,8 @@ class LMOKEandVMOKESchema(Schema, PlotSection, AGE_MagnetisationMeasurement):
     ###### Optional metadata
     H_stop = Quantity(
         type=float,
-        description=(
-            'Stopping field of MinorLoops/FORC measurements in **mT**, kA/m or Oe.'
-        ),
-        unit='mT',
+        description=('Stopping field of MinorLoops/FORC measurements in kA/m.'),
+        unit='kA/m',
     )
 
     wait_time = Quantity(
@@ -323,11 +319,11 @@ class LMOKEandVMOKESchema(Schema, PlotSection, AGE_MagnetisationMeasurement):
         else:
             return None
         figure = go.Figure(
-            go.Scatter(x=magnitudes(self.magnetic_field, 'mT'), y=y, mode='lines')
+            go.Scatter(x=magnitudes(self.magnetic_field, 'kA/m'), y=y, mode='lines')
         )
         figure.update_layout(
             title=self.magnetisation_title(),
-            xaxis_title='Magnetic Field [mT]',
+            xaxis_title='H [kA/m]',
             yaxis_title=yaxis_title,
             xaxis_showgrid=True,
             xaxis_zeroline=True,
@@ -356,8 +352,8 @@ class LMOKEandVMOKESchema(Schema, PlotSection, AGE_MagnetisationMeasurement):
     magnetic_field = Quantity(
         type=float,
         shape=['*'],  # either [longitudinal, transversal, total] or [longitudinal]
-        description='Magnetic fields / field components in **mT**, kA/m or Oe.',
-        unit='mT',
+        description='Magnetic fields / field components in kA/m.',
+        unit='kA/m',
     )
 
     # Intensity
@@ -384,27 +380,27 @@ class LMOKEandVMOKESchema(Schema, PlotSection, AGE_MagnetisationMeasurement):
     # Coercivity
     HC = Quantity(
         type=float,
-        description='Coercivity in **mT**, kA/m or Oe.',
-        unit='mT',
+        description='Coercivity in kA/m.',
+        unit='kA/m',
     )
 
     dHC = Quantity(
         type=float,
-        description='Uncertainty of the coercivity in **mT**, kA/m or Oe.',
-        unit='mT',
+        description='Uncertainty of the coercivity in kA/m.',
+        unit='kA/m',
     )
 
     # Exchange bias
     HEB = Quantity(
         type=float,
-        description='Exchange bias in **mT**, kA/m or Oe.',
-        unit='mT',
+        description='Exchange bias in kA/m.',
+        unit='kA/m',
     )
 
     dHEB = Quantity(
         type=float,
-        description='Uncertainty of the exchange bias in **mT**, kA/m or Oe.',
-        unit='mT',
+        description='Uncertainty of the exchange bias in kA/m.',
+        unit='kA/m',
     )
 
     # Magnetization saturation
@@ -457,15 +453,15 @@ class LMOKEandVMOKESchema(Schema, PlotSection, AGE_MagnetisationMeasurement):
     saturation_fields = Quantity(
         type=float,
         shape=[2],
-        description='Saturation fields in **mT**, kA/m or Oe.',
-        unit='mT',
+        description='Saturation fields in kA/m.',
+        unit='kA/m',
     )
 
     dsaturation_fields = Quantity(
         type=float,
         shape=[2],
-        description='Uncertainty of the saturation fields in **mT**, kA/m or Oe.',
-        unit='mT',
+        description='Uncertainty of the saturation fields in kA/m.',
+        unit='kA/m',
     )
 
     # Slope at HC

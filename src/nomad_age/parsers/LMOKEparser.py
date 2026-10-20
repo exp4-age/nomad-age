@@ -186,6 +186,14 @@ class LMOKEParser(MatchingParser):
             else:
                 lmokeandvmokeschema.comment = 'None'
 
+        # The schema stores fields in kA/m, the unit the L-MOKE software writes.
+        field_unit = re.search(r'^#\s*H\s*\(([^)]*)\)', content, re.MULTILINE)
+        if field_unit and field_unit.group(1).strip() != 'kA/m':
+            logger.warning(
+                f'Field column is in {field_unit.group(1).strip()}, not kA/m; '
+                'field values are stored as kA/m and are wrong.'
+            )
+
         # Process the experimental data using DataTextParser
         experimental_data_parser.mainfile = tmp_data_file
         experimental_data_parser.parse()

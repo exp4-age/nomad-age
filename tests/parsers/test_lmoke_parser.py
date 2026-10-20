@@ -98,3 +98,20 @@ def test_missing_chip_is_reported_not_created(upload, searches, caplog, kwargs_l
         MAINFILE.name,
         'tmp_data_file.txt',  # the parser's temporary data file
     }
+
+
+def test_fields_are_stored_in_ka_per_m(upload, searches):
+    """The L-MOKE log gives H in kA/m; the stored values keep these numbers."""
+    data = parse(upload).data
+    raw = [
+        float(line.split()[0])
+        for line in MAINFILE.read_text().splitlines()
+        if line.strip() and not line.startswith('#')
+    ]
+
+    assert str(data.magnetic_field.units) == 'kiloampere / meter'
+    assert data.magnetic_field.magnitude[0] == pytest.approx(raw[0])
+    assert data.H_start.to('kA/m').magnitude == pytest.approx(data.H_start.magnitude)
+    figure = data.magnetisation_figure()
+    assert figure['layout']['xaxis']['title']['text'] == 'H [kA/m]'
+    assert figure['data'][0]['x'][0] == pytest.approx(raw[0])
