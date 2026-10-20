@@ -301,13 +301,7 @@ age_inventory = AppEntryPoint(
 )
 
 schema_package = 'nomad_age.schema_packages.particle_tracking_schema'
-tracking_schema = f'{schema_package}.AGE_ParticleTracking'
 video_schema = f'{schema_package}.AGE_ParticleTransportVideo'
-
-
-def tracking(path: str) -> str:
-    """Search quantity of a particle tracking measurement."""
-    return f'data.{path}#{tracking_schema}'
 
 
 def video(path: str) -> str:
@@ -542,43 +536,6 @@ def particle_transport_app(
     )
 
 
-particle_tracking = AppEntryPoint(
-    name='particle_tracking',
-    description='Search for particle tracking measurements.',
-    app=particle_transport_app(
-        schema=tracking_schema,
-        label='Particle Tracking',
-        path='particle_tracking',
-        description='Find particle tracking measurements by sample, objective and '
-        'camera settings',
-        readme=(
-            'Particle tracking measurements of the AGE lab. Chips (or coated chips) '
-            'and particle batches are the samples of a measurement, objectives its '
-            'instruments: filter by particles, chips or sample IDs to find all '
-            'recordings of a chip or particle batch, and by spacer thickness for '
-            'recordings on a coated chip, whose chip is listed under chips. '
-            'Particle and localization counts are read from the unfiltered tracks '
-            'file; the filter of an upload is documented in its Trajectory '
-            'filtering entry. The recording ID is the random id that the '
-            'acquisition software gives each recording; video and tracks carry it.'
-        ),
-        menu_title='Particle tracking',
-        columns=[
-            Column(
-                search_quantity=tracking('n_particles'),
-                title='Tracked particles',
-                format=count,
-                selected=True,
-            ),
-            Column(
-                search_quantity=tracking('n_localizations'),
-                title='Localizations',
-                format=count,
-            ),
-        ],
-    ),
-)
-
 particle_transport_videos = AppEntryPoint(
     name='particle_transport_videos',
     description='Search for particle transport videos.',
@@ -593,10 +550,10 @@ particle_transport_videos = AppEntryPoint(
             'harvesters_pg; each entry shows the camera settings and the first '
             'frame. Chips (or coated chips) and particle batches are the samples, '
             'objectives the instruments; filter by particles, chips or the spacer '
-            'thickness of a coated chip. The recording ID is the '
-            'random id that the acquisition software gives each recording: the '
-            'tracks made from a video carry the same one, so filtering by it in '
-            'Particle Tracking finds them.'
+            'thickness of a coated chip. The recording ID is the random id that '
+            'the acquisition software gives each recording. The trajectories '
+            'tracked from a video (with their particle and localization counts) '
+            "are listed under 'Referenced by' in the video's Entry References."
         ),
         menu_title='Particle transport videos',
         columns=[
