@@ -44,6 +44,7 @@ sample_schema = 'nomad_age.schema_packages.age_schema.AGE_Sample'
 coated_sample_schema = 'nomad_age.schema_packages.age_schema.AGE_CoatedSample'
 spin_coating_schema = 'nomad_age.schema_packages.age_schema.AGE_SpinCoating'
 base_entity_schema = 'nomad.datamodel.metainfo.basesections.v1.BaseSection'
+sample_item_schema = 'nomad_age.schema_packages.age_schema.AGE_SampleItem'
 age_samples = AppEntryPoint(
     name='age_samples',
     description='AGE sample database.',
@@ -66,13 +67,9 @@ age_samples = AppEntryPoint(
                 'entry_type',
             ]
         ),
-        filters_locked={
-            'section_defs.definition_qualified_name': [
-                sample_schema,
-                coated_sample_schema,
-                spin_coating_schema,
-            ]
-        },
+        # One marker base section: a locked list of types matches only entries
+        # of all of them, i.e. none.
+        filters_locked={'section_defs.definition_qualified_name': [sample_item_schema]},
         columns=Columns(
             selected=['lab_id', 'state', 'entry_type', 'spacer_thickness'],
             options={
@@ -160,10 +157,11 @@ age_schema = 'nomad_age.schema_packages.age_schema'
 particles_schema = f'{age_schema}.AGE_Particles'
 objective_schema = f'{age_schema}.AGE_Objective'
 # All inventory entry types (lab equipment and consumables). A new type, e.g.
-# cameras, magnets or chemicals, is added here only: the AGE Inventory app
-# includes and lists every type in this tuple. Its own quantities get a column or
-# menu item only where added explicitly below.
+# cameras, magnets or chemicals, derives from AGE_InventoryItem and is added
+# here: the AGE Inventory app includes every type in this tuple. Its own
+# quantities get a column or menu item only where added explicitly below.
 INVENTORY_SCHEMAS = (particles_schema, objective_schema)
+inventory_item_schema = f'{age_schema}.AGE_InventoryItem'
 
 
 def particles(path: str) -> str:
@@ -210,8 +208,10 @@ age_inventory = AppEntryPoint(
                 'datasets.dataset_name',
             ]
         ),
+        # One marker base section (all INVENTORY_SCHEMAS derive from it): a
+        # locked list of types matches only entries of all of them, i.e. none.
         filters_locked={
-            'section_defs.definition_qualified_name': list(INVENTORY_SCHEMAS)
+            'section_defs.definition_qualified_name': [inventory_item_schema]
         },
         columns=[
             Column(search_quantity='entry_type', title='Type', selected=True),

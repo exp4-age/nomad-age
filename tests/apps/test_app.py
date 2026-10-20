@@ -5,6 +5,13 @@ from nomad.datamodel.data import EntryData
 from nomad.datamodel.metainfo.basesections import BaseSection
 
 from nomad_age import apps
+from nomad_age.schema_packages.age_schema import (
+    AGE_CoatedSample,
+    AGE_InventoryItem,
+    AGE_Sample,
+    AGE_SampleItem,
+    AGE_SpinCoating,
+)
 
 APPS = [
     entry_point.app
@@ -76,9 +83,14 @@ def test_inventory_app_shows_every_inventory_type():
         assert issubclass(section, BaseSection)
 
     app = apps.age_inventory.app
+    # locked to one marker base section: a list of types would match only
+    # entries of all types at once, i.e. none
     assert app.filters_locked == {
-        'section_defs.definition_qualified_name': list(apps.INVENTORY_SCHEMAS)
+        'section_defs.definition_qualified_name': [apps.inventory_item_schema]
     }
+    assert apps.inventory_item_schema.endswith('.AGE_InventoryItem')
+    for section in types:
+        assert issubclass(section, AGE_InventoryItem)
     for qualified_name in apps.INVENTORY_SCHEMAS:
         assert f'*#{qualified_name}' in app.search_quantities.include
     # The app names the production (NOMAD 1.4) BaseSection, which differs from
@@ -89,3 +101,19 @@ def test_inventory_app_shows_every_inventory_type():
         for column in app.columns
         if column.search_quantity.endswith(base_entity)
     } == {f'data.{name}{base_entity}' for name in ('name', 'lab_id', 'description')}
+
+
+def test_apps_lock_to_one_value_only():
+    """NOMAD ANDs the values of a locked filter; with several types no entry
+    matches (empty app)."""
+    for app in (apps.age_inventory.app, apps.age_samples.app):
+        for values in app.filters_locked.values():
+            assert len(values) == 1
+
+
+def test_sample_app_types_derive_from_the_marker():
+    for section in (AGE_Sample, AGE_CoatedSample, AGE_SpinCoating):
+        assert issubclass(section, AGE_SampleItem)
+    assert apps.age_samples.app.filters_locked == {
+        'section_defs.definition_qualified_name': [apps.sample_item_schema]
+    }
