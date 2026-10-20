@@ -1,5 +1,6 @@
 import json
 import math
+import re
 from datetime import datetime, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -15,6 +16,11 @@ YAML_DUMPER = getattr(yaml, 'CSafeDumper', yaml.SafeDumper)
 
 # Lab software (camera, field cooling) writes wall-clock times without a zone.
 LAB_TIMEZONE = ZoneInfo('Europe/Berlin')
+
+# Chips: one central upload holds all AGE_Sample entries; parsers only link them.
+AGE_SAMPLE_SCHEMA = 'nomad_age.schema_packages.age_schema.AGE_Sample'
+# A sputter run <year>_<number>; its samples are <run>_1, <run>_2, ...
+SPUTTER_RUN_RE = re.compile(r'\d{4}_\d{4}')
 
 
 def get_reference(upload_id, entry_id):
@@ -213,13 +219,44 @@ def update_entry(entry, eid, archive, logger, parsed_wins=(), parser_owned=()):
     return type(entry).m_from_dict(new_entry_dict)
 
 
+def normalize_sample_id(lab_id: str) -> str:
+    """The lab id of a chip: a bare sputter run such as 2023_0418 means its first
+    sample 2023_0418_1; ids with suffixes and other lab ids stay as they are."""
+    lab_id = lab_id.strip()
+    return f'{lab_id}_1' if SPUTTER_RUN_RE.fullmatch(lab_id) else lab_id
+
+
 def find_existing_AGE_sample(lab_id: str, user_id=None):
-    """Searches all entries in the database for matching lab_id."""
+    """AGE_Sample entries with `lab_id` that the user with `user_id` sees (own,
+    shared or published; without user id only published ones)."""
     from nomad.search import search
 
-    query = {'results.eln.lab_ids': lab_id}
-    search_result = search(query=query, owner='visible', user_id=user_id)
-    return search_result
+    query = {
+        'results.eln.lab_ids': lab_id,
+        'section_defs.definition_qualified_name': AGE_SAMPLE_SCHEMA,
+    }
+    return search(query=query, owner='visible', user_id=user_id)
+
+
+def find_chip_reference(lab_id: str, archive, logger) -> Optional[str]:
+    """Reference to the data of the chip (AGE_Sample) with the normalized `lab_id`
+    in any upload the main author of `archive` sees; None if there is no such
+    chip or more than one. Parsers never create chips: they live in the AGE
+    Samples upload."""
+    lab_id = normalize_sample_id(lab_id)
+    main_author = archive.metadata.main_author
+    user_id = main_author.user_id if main_author else None
+    hits = find_existing_AGE_sample(lab_id, user_id=user_id).data
+    if not hits:
+        logger.warning(
+            f'No AGE sample with lab_id {lab_id} found; not linked. Create the chip '
+            'in the AGE Samples upload, then reprocess this entry.'
+        )
+        return None
+    if len(hits) > 1:
+        logger.error(f'Found {len(hits)} AGE samples with lab_id {lab_id}; not linked.')
+        return None
+    return f'{get_reference(hits[0]["upload_id"], hits[0]["entry_id"])}#data'
 
 
 def get_referencing_entries(archive: ArchiveSection) -> list:

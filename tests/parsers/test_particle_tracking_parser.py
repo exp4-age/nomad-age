@@ -4,6 +4,7 @@ import io
 import logging
 import os
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import h5py
 import numpy as np
@@ -42,6 +43,7 @@ from nomad_age.schema_packages.particle_tracking_schema import (
     AGE_ParticleTracking,
     AGE_ParticleTransportVideo,
 )
+from nomad_age.utils import utils
 from nomad_age.utils.utils import (
     get_entry_id,
     get_hash_ref,
@@ -488,6 +490,34 @@ def test_camera_timestamp_wins_over_filename_date(tmp_path):
 )
 def test_chip_ids_from_filename(filename, chip_ids):
     assert chip_ids_from_filename(filename) == chip_ids
+
+
+@pytest.mark.parametrize('found', [False, True])
+def test_videos_link_chips_but_never_create_them(tmp_path, monkeypatch, caplog, found):
+    def search(lab_id, user_id=None):
+        hits = [{'upload_id': 'age_samples', 'entry_id': f'chip_{lab_id}'}]
+        return SimpleNamespace(data=hits if found else [])
+
+    monkeypatch.setattr(utils, 'find_existing_AGE_sample', search)
+    write_video(tmp_path / '2023_0418_rec.h5', recording(ID_A))
+
+    with caplog.at_level(logging.WARNING):
+        data = parse(ParticleTransportVideoParser(), tmp_path, '2023_0418_rec.h5')
+
+    (chip, *_) = data['samples']
+    assert (chip['name'], chip['lab_id']) == ('2023_0418_1', '2023_0418_1')
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    if found:
+        reference = '../uploads/age_samples/archive/chip_2023_0418_1#data'
+        assert chip['reference'] == reference
+        assert not warnings
+    else:
+        assert 'reference' not in chip
+        (warning,) = warnings
+        assert '2023_0418_1' in warning.getMessage()
+    assert {p.name for p in tmp_path.glob('*.archive.yaml')} == {
+        '2023_0418_rec.h5.archive.yaml'
+    }
 
 
 def test_trajectory_plot_keeps_longest_tracks_and_caps_points():
