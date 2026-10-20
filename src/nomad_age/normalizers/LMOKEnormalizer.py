@@ -38,14 +38,7 @@ class LMOKENormalizer(Normalizer):
             )
 
             try:
-                if archive.data.magnetization is not None:
-                    archive.data.generate_hysteresis_plot(
-                        x_name='magnetic_field', y_name='magnetization'
-                    )
-                else:
-                    archive.data.generate_hysteresis_plot(
-                        x_name='magnetic_field', y_name='intensity'
-                    )
+                archive.data.generate_hysteresis_plot()
             except Exception as e:
                 logger.error(f'Error generating hysteresis plot: {e}')
                 logger.error(traceback.format_exc())
