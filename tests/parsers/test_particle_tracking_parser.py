@@ -38,8 +38,11 @@ from nomad_age.parsers.particle_tracking_parser import (
     share_with_tracks,
     time_from_filename,
 )
-from nomad_age.schema_packages.age_schema import AGE_RawFile
+from nomad_age.schema_packages import particle_tracking_schema
+from nomad_age.schema_packages.age_schema import AGE_RawFile, AGE_Sample
 from nomad_age.schema_packages.particle_tracking_schema import (
+    FROM_SAMPLES,
+    AGE_FocusSweep,
     AGE_ParticleTracking,
     AGE_ParticleTransportVideo,
 )
@@ -48,6 +51,7 @@ from nomad_age.utils.utils import (
     get_entry_id,
     get_hash_ref,
     merge_stored_values,
+    parse_reference,
     user_editable_keys,
 )
 
@@ -83,10 +87,10 @@ def lab_ids(references):
     return [reference['lab_id'] for reference in references or []]
 
 
-def parse(parser, tmp_path, mainfile):
+def parse(parser, tmp_path, mainfile, context=None):
     """Parse `mainfile` of an upload in `tmp_path`; the data of its entry YAML."""
     archive = EntryArchive(
-        m_context=ClientContext(local_dir=str(tmp_path)),
+        m_context=context or ClientContext(local_dir=str(tmp_path)),
         metadata=EntryMetadata(mainfile=mainfile, upload_id='test_upload'),
     )
     parser.parse(str(tmp_path / mainfile), archive, logging.getLogger(__name__))
@@ -800,6 +804,623 @@ def test_video_entry_passes_its_samples_and_instruments_to_its_tracks(tmp_path):
         assert yaml.safe_load(f)['data'] == other
 
 
+INVENTORY_UPLOAD_ID = 'inventory_upload'
+
+
+def inventory_reference(entry_id):
+    return f'../uploads/{INVENTORY_UPLOAD_ID}/archive/{entry_id}#data'
+
+
+INVENTORY = {
+    (INVENTORY_UPLOAD_ID, 'obj20'): {
+        'm_def': 'nomad_age.schema_packages.age_schema.AGE_Objective',
+        'name': 'Objective 20x',
+        'lab_id': 'OBJ-20x',
+    },
+    (INVENTORY_UPLOAD_ID, 'obj50'): {
+        'm_def': 'nomad_age.schema_packages.age_schema.AGE_Objective',
+        'name': 'Objective 50x',
+        'lab_id': 'OBJ-50x',
+    },
+    (INVENTORY_UPLOAD_ID, 'm270'): {
+        'm_def': 'nomad_age.schema_packages.age_schema.AGE_Particles',
+        'name': 'Dynabeads M-270',
+        'lab_id': 'M270',
+    },
+    (INVENTORY_UPLOAD_ID, 'nh2'): {
+        'm_def': 'nomad_age.schema_packages.age_schema.AGE_Particles',
+        'name': 'micromer-M NH2',
+        'lab_id': 'NH2',
+    },
+    (INVENTORY_UPLOAD_ID, 'cooh'): {
+        'm_def': 'nomad_age.schema_packages.age_schema.AGE_Particles',
+        'name': 'micromer-M COOH',
+        'lab_id': 'COOH',
+    },
+    (INVENTORY_UPLOAD_ID, 'camera'): {
+        'm_def': 'nomad.datamodel.metainfo.eln.ELNInstrument',
+        'name': 'Camera MC2066',
+        'lab_id': 'CAM-1',
+    },
+}
+
+
+def instrument(entry_id):
+    """An instrument as NOMAD stores it once the lab_id found its entry."""
+    lab_id = INVENTORY[(INVENTORY_UPLOAD_ID, entry_id)]['lab_id']
+    return {
+        'name': lab_id,
+        'lab_id': lab_id,
+        'reference': inventory_reference(entry_id),
+    }
+
+
+def linked(instruments) -> list:
+    """(name, lab_id, linked entry id) of instrument sections."""
+    return [(i.name, i.lab_id, parse_reference(i.reference)[1]) for i in instruments]
+
+
+def write_measurement(tmp_path, entry_type, **data):
+    data = {'m_def': f'{SCHEMA}.{entry_type}', 'name': 'rec', **data}
+    with open(tmp_path / 'rec.archive.yaml', 'w') as f:
+        yaml.dump({'data': data}, f)
+
+
+SCHEMA = 'nomad_age.schema_packages.particle_tracking_schema'
+WITH_OBJECTIVE = ['AGE_ParticleTransportVideo', 'AGE_FocusSweep']
+
+
+def test_objective_is_shown_and_edited_on_the_overview():
+    for section in (AGE_ParticleTransportVideo, AGE_FocusSweep):
+        objective = section.m_def.all_quantities['objective']
+        eln = objective.m_annotations['eln']
+        assert eln.component == 'ReferenceEditQuantity'
+        assert eln.label == 'Objective'
+        assert 'objective' in user_editable_keys(section.m_def)
+        assert section.m_def.m_annotations['eln'].properties.order == [
+            'name',
+            'datetime',
+            'chip',
+            'coating',
+            'particle_batches',
+            'objective',
+        ]
+    # tracks take the instruments of their video and pick no objective
+    assert 'objective' not in AGE_ParticleTracking.m_def.all_quantities
+
+
+def test_picked_objective_becomes_the_objective_instrument_of_video_and_tracks(
+    tmp_path, process_entry, stored_archives_context, kwargs_logger, caplog
+):
+    write_video(tmp_path / 'rec.h5', recording(ID_A))
+    write_tracks(tmp_path / 'rec_trajs.h5', make_tracks(), recording(ID_A))
+    parse(ParticleTrackingParser(), tmp_path, 'rec_trajs.h5')
+    video = parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+    assert not video.get('instruments')
+    # picked on the overview page
+    video['objective'] = inventory_reference('obj20')
+    with open(tmp_path / 'rec.h5.archive.yaml', 'w') as f:
+        yaml.dump({'data': video}, f)
+    context = stored_archives_context(tmp_path, INVENTORY)
+
+    data = process_entry(
+        tmp_path, 'rec.h5.archive.yaml', logger=kwargs_logger, context=context
+    ).data
+
+    assert parse_reference(data.objective) == (INVENTORY_UPLOAD_ID, 'obj20')
+    assert linked(data.instruments) == [('Objective 20x', 'OBJ-20x', 'obj20')]
+    with open(tmp_path / 'rec_trajs.h5.archive.yaml') as f:
+        tracks = yaml.safe_load(f)['data']
+    assert lab_ids(tracks['instruments']) == ['OBJ-20x']
+    assert parse_reference(tracks['instruments'][0]['reference'])[1] == 'obj20'
+    assert 'objective' not in tracks
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+@pytest.mark.parametrize('entry_type', WITH_OBJECTIVE)
+def test_objective_is_taken_from_the_objective_instrument(
+    tmp_path, process_entry, stored_archives_context, kwargs_logger, entry_type
+):
+    # as the parser links it from the objective attribute, or older entries
+    write_measurement(
+        tmp_path,
+        entry_type,
+        instruments=[instrument('camera'), instrument('obj20')],
+    )
+    context = stored_archives_context(tmp_path, INVENTORY)
+
+    data = process_entry(
+        tmp_path, 'rec.archive.yaml', logger=kwargs_logger, context=context
+    ).data
+
+    assert parse_reference(data.objective) == (INVENTORY_UPLOAD_ID, 'obj20')
+    assert linked(data.instruments) == [
+        ('Camera MC2066', 'CAM-1', 'camera'),
+        ('Objective 20x', 'OBJ-20x', 'obj20'),
+    ]
+
+
+@pytest.mark.parametrize('entry_type', WITH_OBJECTIVE)
+def test_picking_another_objective_replaces_the_objective_instrument(
+    tmp_path, process_entry, stored_archives_context, kwargs_logger, entry_type
+):
+    # a save in the GUI: the new objective next to the instruments from before
+    write_measurement(
+        tmp_path,
+        entry_type,
+        objective=inventory_reference('obj50'),
+        instruments=[instrument('obj20'), instrument('camera'), instrument('obj20')],
+    )
+    context = stored_archives_context(tmp_path, INVENTORY)
+
+    def process():
+        return process_entry(
+            tmp_path, 'rec.archive.yaml', logger=kwargs_logger, context=context
+        ).data
+
+    data = process()
+
+    assert parse_reference(data.objective) == (INVENTORY_UPLOAD_ID, 'obj50')
+    assert linked(data.instruments) == [
+        ('Objective 50x', 'OBJ-50x', 'obj50'),
+        ('Camera MC2066', 'CAM-1', 'camera'),
+    ]
+    # the next save stores what the GUI shows: nothing changes any more
+    saved = data.m_to_dict(with_root_def=True)
+    with open(tmp_path / 'rec.archive.yaml', 'w') as f:
+        yaml.dump({'data': saved}, f)
+    again = process()
+    assert parse_reference(again.objective) == (INVENTORY_UPLOAD_ID, 'obj50')
+    assert linked(again.instruments) == linked(data.instruments)
+    assert again.m_to_dict(with_root_def=True) == saved
+
+
+@pytest.mark.parametrize('attribute', ['OBJ-20x', None])
+def test_reprocessing_keeps_the_picked_objective(
+    tmp_path,
+    stored_archives,
+    process_entry,
+    stored_archives_context,
+    kwargs_logger,
+    attribute,
+):
+    attrs = recording(ID_A)
+    if attribute:
+        attrs = with_inventory(attrs, 'M270-2024-03', attribute)
+    write_video(tmp_path / 'rec.h5', attrs)
+    written = parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+    # the processed archive after the objective was picked on the overview page
+    processed = {
+        **written,
+        'objective': inventory_reference('obj50'),
+        'instruments': [{**instrument('obj50'), 'name': 'Objective 50x'}],
+    }
+    stored_archives({get_entry_id('test_upload', 'rec.h5.archive.yaml'): processed})
+
+    reparsed = parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+
+    assert reparsed['objective'] == inventory_reference('obj50')
+    assert lab_ids(reparsed['instruments']) == ['OBJ-50x']
+    context = stored_archives_context(tmp_path, INVENTORY)
+    data = process_entry(
+        tmp_path, 'rec.h5.archive.yaml', logger=kwargs_logger, context=context
+    ).data
+    assert parse_reference(data.objective) == (INVENTORY_UPLOAD_ID, 'obj50')
+    assert linked(data.instruments) == [('Objective 50x', 'OBJ-50x', 'obj50')]
+
+
+def test_tracks_take_the_picked_objective_from_the_video_entry(
+    tmp_path, stored_archives_context
+):
+    write_video(tmp_path / 'rec.h5', recording(ID_A))
+    write_tracks(tmp_path / 'rec_trajs.h5', make_tracks(), recording(ID_A))
+    video = parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+    # saved in the GUI after picking another objective than the linked one
+    video['objective'] = inventory_reference('obj50')
+    video['instruments'] = [instrument('obj20'), instrument('camera')]
+    with open(tmp_path / 'rec.h5.archive.yaml', 'w') as f:
+        yaml.dump({'data': video}, f)
+    context = stored_archives_context(tmp_path, INVENTORY)
+
+    tracks = parse(ParticleTrackingParser(), tmp_path, 'rec_trajs.h5', context)
+
+    assert lab_ids(tracks['instruments']) == ['OBJ-50x', 'CAM-1']
+    assert 'objective' not in tracks
+
+
+def test_objective_text_of_old_entries_is_dropped(
+    tmp_path, process_entry, stored_archives_context, kwargs_logger, caplog
+):
+    # entries saved before objectives were entries stored free text
+    write_measurement(
+        tmp_path,
+        'AGE_ParticleTransportVideo',
+        objective='20x',
+        instruments=[instrument('obj20')],
+    )
+    context = stored_archives_context(tmp_path, INVENTORY)
+
+    data = process_entry(
+        tmp_path, 'rec.archive.yaml', logger=kwargs_logger, context=context
+    ).data
+
+    assert parse_reference(data.objective) == (INVENTORY_UPLOAD_ID, 'obj20')
+    assert linked(data.instruments) == [('Objective 20x', 'OBJ-20x', 'obj20')]
+    assert "Objective '20x' is text" in caplog.text
+
+
+SAMPLES_UPLOAD_ID = 'age_samples'
+AGE_SCHEMA = 'nomad_age.schema_packages.age_schema'
+
+
+def samples_reference(entry_id):
+    return f'../uploads/{SAMPLES_UPLOAD_ID}/archive/{entry_id}#data'
+
+
+def coated_chip(chip, layer, thickness, coated, removed=None):
+    lab_id = {'chip1': '2023_0418_1', 'chip2': '2023_0325_1'}[chip]
+    return {
+        'm_def': f'{AGE_SCHEMA}.AGE_CoatedSample',
+        'lab_id': f'{lab_id}_PMMA{layer}',
+        'chip': samples_reference(chip),
+        'spacer_thickness': thickness,
+        'date_coated': coated,
+        'date_removed': removed,
+    }
+
+
+# The AGE Samples upload; the layers of chip1 follow each other, the dates are
+# entered without time (midnight UTC or lab time).
+AGE_SAMPLES = {
+    (SAMPLES_UPLOAD_ID, 'chip1'): {
+        'm_def': f'{AGE_SCHEMA}.AGE_Sample',
+        'name': '2023_0418_1',
+        'lab_id': '2023_0418_1',
+    },
+    (SAMPLES_UPLOAD_ID, 'chip2'): {
+        'm_def': f'{AGE_SCHEMA}.AGE_Sample',
+        'name': '2023_0325_1',
+        'lab_id': '2023_0325_1',
+    },
+    (SAMPLES_UPLOAD_ID, 'pmma3'): coated_chip(
+        'chip1', 3, 1210.0, '2025-11-03T00:00:00+00:00', '2026-02-20T00:00:00+00:00'
+    ),
+    (SAMPLES_UPLOAD_ID, 'pmma4'): coated_chip(
+        'chip1', 4, 2400.0, '2026-02-20T00:00:00+00:00', '2026-04-14T22:00:00+00:00'
+    ),
+    (SAMPLES_UPLOAD_ID, 'pmma5'): coated_chip(
+        'chip1', 5, 3369.25, '2026-04-15T00:00:00+00:00', '2026-10-14T00:00:00+00:00'
+    ),
+    (SAMPLES_UPLOAD_ID, 'chip2_pmma1'): coated_chip(
+        'chip2', 1, 980.0, '2026-01-05T00:00:00+00:00'
+    ),
+    (INVENTORY_UPLOAD_ID, 'm270'): {
+        'm_def': f'{AGE_SCHEMA}.AGE_Particles',
+        'name': 'M270 batch 3',
+        'lab_id': 'M270-2024-03',
+    },
+}
+# while PMMA5 is on chip1 and PMMA1 on chip2
+PMMA5_TIME = '2026-06-02T10:00:00+00:00'
+
+
+def sample(entry_id, **data):
+    """A sample as NOMAD stores it once the lab_id found its entry."""
+    upload_id = INVENTORY_UPLOAD_ID if entry_id == 'm270' else SAMPLES_UPLOAD_ID
+    lab_id = AGE_SAMPLES[(upload_id, entry_id)]['lab_id']
+    reference = f'../uploads/{upload_id}/archive/{entry_id}#data'
+    return {'name': lab_id, 'lab_id': lab_id, 'reference': reference, **data}
+
+
+def linked_ids(samples) -> list:
+    """Entry ids that sample sections or dicts link."""
+    return [
+        parse_reference(s['reference'] if isinstance(s, dict) else s.reference)[1]
+        for s in samples
+    ]
+
+
+def links(samples) -> list:
+    """(name, lab_id, linked entry id) of sample sections or dicts."""
+    return [
+        (s['name'], s['lab_id'], i) if isinstance(s, dict) else (s.name, s.lab_id, i)
+        for s, i in zip(samples, linked_ids(samples))
+    ]
+
+
+def entry_id_of(reference):
+    return parse_reference(reference)[1] if reference is not None else None
+
+
+@pytest.fixture
+def coated_chips(fake_index):
+    """The search index finds the coated chips of AGE_SAMPLES by their chip."""
+    for (upload_id, entry_id), data in AGE_SAMPLES.items():
+        if data['m_def'].endswith('AGE_CoatedSample'):
+            fake_index.docs.append(
+                {
+                    'upload_id': upload_id,
+                    'entry_id': entry_id,
+                    'entry_references': [
+                        {'target_entry_id': parse_reference(data['chip'])[1]}
+                    ],
+                    'section_defs': [
+                        {'definition_qualified_name': data['m_def']},
+                        {'definition_qualified_name': 'nomad.datamodel.data.EntryData'},
+                    ],
+                }
+            )
+    return fake_index
+
+
+def warning_messages(caplog) -> list:
+    return [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_chip_is_picked_on_the_overview_and_its_coating_shown():
+    for section in (AGE_ParticleTransportVideo, AGE_FocusSweep):
+        quantities = section.m_def.all_quantities
+        chip = quantities['chip'].m_annotations['eln']
+        assert (chip.component, chip.label) == ('ReferenceEditQuantity', 'Chip')
+        # the dropdown offers bare chips only
+        assert quantities['chip'].type.target_section_def is AGE_Sample.m_def
+        coating = quantities['coating'].m_annotations['eln']
+        assert (coating.component, coating.label) == (
+            'ReferenceEditQuantity',
+            'Coating',
+        )
+        editable = user_editable_keys(section.m_def)
+        assert 'chip' in editable
+        assert 'coating' not in editable  # derived, shown read-only
+    assert 'coating' in FROM_SAMPLES  # not kept from the stored entry on reparse
+    assert not {'chip', 'coating'} & AGE_ParticleTracking.m_def.all_quantities.keys()
+
+
+@pytest.mark.parametrize('entry_type', WITH_OBJECTIVE)
+def test_picked_chip_links_its_coating_at_the_time_of_the_measurement(
+    tmp_path,
+    process_entry,
+    stored_archives_context,
+    coated_chips,
+    kwargs_logger,
+    caplog,
+    entry_type,
+):
+    write_measurement(
+        tmp_path,
+        entry_type,
+        datetime=PMMA5_TIME,
+        chip=samples_reference('chip1'),
+        samples=[sample('m270'), sample('chip1')],
+    )
+    context = stored_archives_context(tmp_path, AGE_SAMPLES)
+
+    def process():
+        return process_entry(
+            tmp_path, 'rec.archive.yaml', logger=kwargs_logger, context=context
+        ).data
+
+    data = process()
+
+    assert linked_ids(data.samples) == ['m270', 'pmma5']
+    assert entry_id_of(data.chip) == 'chip1'
+    assert entry_id_of(data.coating) == 'pmma5'
+    assert data.spacer_thickness.to('nm').magnitude == 3369.25
+    assert [p.name for p in data.particles] == ['M270 batch 3']
+    assert [c.name for c in data.chips] == ['2023_0418_1']
+    assert not warning_messages(caplog)
+    # the next save stores what the GUI shows: nothing changes any more
+    saved = data.m_to_dict(with_root_def=True)
+    with open(tmp_path / 'rec.archive.yaml', 'w') as f:
+        yaml.dump({'data': saved}, f)
+    assert process().m_to_dict(with_root_def=True) == saved
+
+
+@pytest.mark.parametrize(
+    'moment, linked, warning',
+    [
+        ('2026-01-15T10:00:00+00:00', 'pmma3', None),
+        # 23:00 lab time, the day before PMMA4 was removed and PMMA5 coated
+        ('2026-04-14T21:00:00+00:00', 'pmma4', None),
+        (
+            '2026-04-15T12:43:48+00:00',
+            'pmma5',
+            'Coated chips 2023_0418_1_PMMA4, 2023_0418_1_PMMA5 of chip 2023_0418_1 '
+            'were all on it on 2026-04-15',
+        ),
+        ('2025-06-01T10:00:00+00:00', 'chip1', 'None of the 3 coated chips'),
+        (None, 'chip1', 'The measurement has no datetime'),
+    ],
+    ids=['PMMA3', 'day before boundary', 'boundary day', 'before any', 'no time'],
+)
+def test_coating_is_the_one_on_the_chip_at_the_datetime(
+    tmp_path,
+    process_entry,
+    stored_archives_context,
+    coated_chips,
+    kwargs_logger,
+    caplog,
+    moment,
+    linked,
+    warning,
+):
+    data = {'datetime': moment} if moment else {}
+    write_measurement(
+        tmp_path,
+        'AGE_ParticleTransportVideo',
+        chip=samples_reference('chip1'),
+        samples=[sample('pmma5'), sample('m270')],
+        **data,
+    )
+    context = stored_archives_context(tmp_path, AGE_SAMPLES)
+
+    data = process_entry(
+        tmp_path, 'rec.archive.yaml', logger=kwargs_logger, context=context
+    ).data
+
+    assert linked_ids(data.samples) == [linked, 'm270']
+    coated = linked if linked != 'chip1' else None
+    assert entry_id_of(data.coating) == coated
+    thickness = AGE_SAMPLES[(SAMPLES_UPLOAD_ID, linked)].get('spacer_thickness')
+    assert (data.spacer_thickness and data.spacer_thickness.magnitude) == thickness
+    if warning is None:
+        assert not warning_messages(caplog)
+    else:
+        assert len(warning_messages(caplog)) == 1
+        assert warning in warning_messages(caplog)[0]
+
+
+def test_chip_is_taken_from_the_coated_chip_the_samples_link(
+    tmp_path, process_entry, stored_archives_context, coated_chips, kwargs_logger
+):
+    # existing videos: the coated chip was linked under samples by hand
+    samples = [sample('m270'), sample('pmma5', name='coated chip')]
+    write_measurement(
+        tmp_path, 'AGE_ParticleTransportVideo', datetime=PMMA5_TIME, samples=samples
+    )
+    context = stored_archives_context(tmp_path, AGE_SAMPLES)
+
+    data = process_entry(
+        tmp_path, 'rec.archive.yaml', logger=kwargs_logger, context=context
+    ).data
+
+    assert entry_id_of(data.chip) == 'chip1'
+    assert entry_id_of(data.coating) == 'pmma5'
+    assert links(data.samples) == links(samples)  # the same links stay
+
+
+@pytest.mark.parametrize('entry_type', WITH_OBJECTIVE)
+def test_picking_another_chip_replaces_the_chip_among_the_samples(
+    tmp_path,
+    process_entry,
+    stored_archives_context,
+    coated_chips,
+    kwargs_logger,
+    entry_type,
+):
+    # a save in the GUI: the new chip next to the samples from before
+    write_measurement(
+        tmp_path,
+        entry_type,
+        datetime=PMMA5_TIME,
+        chip=samples_reference('chip2'),
+        samples=[sample('pmma5'), sample('m270'), sample('chip1')],
+    )
+    context = stored_archives_context(tmp_path, AGE_SAMPLES)
+
+    data = process_entry(
+        tmp_path, 'rec.archive.yaml', logger=kwargs_logger, context=context
+    ).data
+
+    assert linked_ids(data.samples) == ['chip2_pmma1', 'm270']
+    assert [s.lab_id for s in data.samples] == ['2023_0325_1_PMMA1', 'M270-2024-03']
+    assert entry_id_of(data.coating) == 'chip2_pmma1'
+    assert [c.name for c in data.chips] == ['2023_0325_1']
+
+
+def test_samples_stay_if_the_coated_chips_cannot_be_looked_up(
+    tmp_path,
+    process_entry,
+    stored_archives_context,
+    kwargs_logger,
+    caplog,
+    monkeypatch,
+):
+    def unavailable(chip_entry_id, user_id=None):
+        raise ConnectionError('search index unavailable')
+
+    monkeypatch.setattr(particle_tracking_schema, 'find_coated_samples', unavailable)
+    samples = [sample('chip1'), sample('m270')]
+    write_measurement(
+        tmp_path,
+        'AGE_ParticleTransportVideo',
+        datetime=PMMA5_TIME,
+        chip=samples_reference('chip2'),
+        samples=samples,
+    )
+    context = stored_archives_context(tmp_path, AGE_SAMPLES)
+
+    data = process_entry(
+        tmp_path, 'rec.archive.yaml', logger=kwargs_logger, context=context
+    ).data
+
+    assert links(data.samples) == links(samples)
+    assert data.coating is None
+    assert warning_messages(caplog) == [
+        "Coated chips of chip 2023_0325_1 not looked up: ConnectionError('search "
+        "index unavailable'); samples left as they are"
+    ]
+
+
+def test_reprocessing_keeps_the_picked_chip_and_the_tracks_get_its_coating(
+    tmp_path,
+    monkeypatch,
+    stored_archives,
+    process_entry,
+    stored_archives_context,
+    coated_chips,
+    kwargs_logger,
+):
+    # the parser links the chip in the file name, here chip1
+    monkeypatch.setattr(
+        utils,
+        'find_existing_AGE_sample',
+        lambda lab_id, user_id=None: SimpleNamespace(
+            data=[{'upload_id': SAMPLES_UPLOAD_ID, 'entry_id': 'chip1'}]
+        ),
+    )
+    attrs = {**recording(ID_A), 'timestamp': '20260602120000'}
+    write_video(tmp_path / '2023_0418_rec.h5', attrs)
+    write_tracks(tmp_path / '2023_0418_rec_trajs.h5', make_tracks(), attrs)
+    parse(ParticleTrackingParser(), tmp_path, '2023_0418_rec_trajs.h5')
+    written = parse(ParticleTransportVideoParser(), tmp_path, '2023_0418_rec.h5')
+    assert linked_ids(written['samples']) == ['chip1']
+    # the processed archive after chip2 was picked on the overview page
+    processed = {
+        **written,
+        'chip': samples_reference('chip2'),
+        'coating': samples_reference('chip2_pmma1'),
+        'samples': [sample('chip2_pmma1')],
+    }
+    eid = get_entry_id('test_upload', '2023_0418_rec.h5.archive.yaml')
+    stored_archives({eid: processed})
+
+    reparsed = parse(ParticleTransportVideoParser(), tmp_path, '2023_0418_rec.h5')
+
+    assert reparsed['chip'] == samples_reference('chip2')
+    assert linked_ids(reparsed['samples']) == ['chip2_pmma1']
+    assert 'coating' not in reparsed  # derived again on processing
+    context = stored_archives_context(tmp_path, AGE_SAMPLES)
+    data = process_entry(
+        tmp_path, '2023_0418_rec.h5.archive.yaml', logger=kwargs_logger, context=context
+    ).data
+    assert entry_id_of(data.coating) == 'chip2_pmma1'
+    with open(tmp_path / '2023_0418_rec_trajs.h5.archive.yaml') as f:
+        tracks = yaml.safe_load(f)['data']
+    assert linked_ids(tracks['samples']) == ['chip2_pmma1']
+    assert not tracks.keys() & {'chip', 'coating'}
+
+
+def test_tracks_take_the_coating_of_the_picked_chip_from_the_video_entry(
+    tmp_path, stored_archives_context, coated_chips
+):
+    write_video(tmp_path / 'rec.h5', recording(ID_A))
+    write_tracks(tmp_path / 'rec_trajs.h5', make_tracks(), recording(ID_A))
+    video = parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+    # saved in the GUI after picking another chip than the linked one
+    video['datetime'] = PMMA5_TIME
+    video['chip'] = samples_reference('chip2')
+    video['samples'] = [sample('pmma5'), {'name': 'M270', 'lab_id': 'M270-2024-03'}]
+    with open(tmp_path / 'rec.h5.archive.yaml', 'w') as f:
+        yaml.dump({'data': video}, f)
+    context = stored_archives_context(tmp_path, AGE_SAMPLES)
+
+    tracks = parse(ParticleTrackingParser(), tmp_path, 'rec_trajs.h5', context)
+
+    assert lab_ids(tracks['samples']) == ['2023_0325_1_PMMA1', 'M270-2024-03']
+    assert not tracks.keys() & {'chip', 'coating'}
+
+
 def parse_raw_file(parser, tmp_path, mainfile):
     """Parse `mainfile` of an upload in `tmp_path`; its normalized AGE_RawFile."""
     archive = EntryArchive(
@@ -893,3 +1514,121 @@ def test_old_entry_gains_raw_file_once_and_keeps_user_edits(tmp_path, stored_arc
     parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
     assert entry_file.read_text() == text
     assert entry_file.stat().st_mtime_ns == mtime
+
+
+def test_particles_are_shown_and_edited_on_the_overview():
+    for section in (AGE_ParticleTransportVideo, AGE_FocusSweep):
+        batches = section.m_def.all_quantities['particle_batches']
+        assert batches.m_annotations['eln'].component == 'ReferenceEditQuantity'
+        assert batches.m_annotations['eln'].label == 'Particles'
+        assert list(batches.shape) == ['*']
+        assert 'particle_batches' in user_editable_keys(section.m_def)
+    assert 'particle_batches' not in AGE_ParticleTracking.m_def.all_quantities
+
+
+def particle(entry_id):
+    """A particle sample as NOMAD stores it once the lab_id found its entry."""
+    return instrument(entry_id)
+
+
+def batch_ids(data) -> list:
+    return [parse_reference(b)[1] for b in data.particle_batches]
+
+
+@pytest.mark.parametrize('entry_type', WITH_OBJECTIVE)
+def test_picked_particles_replace_the_particle_samples(
+    tmp_path, process_entry, stored_archives_context, kwargs_logger, entry_type
+):
+    # a save in the GUI: two batches picked, M-270 linked from before
+    write_measurement(
+        tmp_path,
+        entry_type,
+        particle_batches=[
+            inventory_reference('nh2'),
+            inventory_reference('cooh'),
+            inventory_reference('nh2'),
+        ],
+        samples=[particle('m270'), instrument('camera')],
+    )
+    context = stored_archives_context(tmp_path, INVENTORY)
+
+    def process():
+        return process_entry(
+            tmp_path, 'rec.archive.yaml', logger=kwargs_logger, context=context
+        ).data
+
+    data = process()
+
+    assert batch_ids(data) == ['nh2', 'cooh']
+    assert [parse_reference(s.reference)[1] for s in data.samples] == [
+        'nh2',
+        'cooh',
+        'camera',
+    ]
+    assert [p.name for p in data.particles] == ['micromer-M NH2', 'micromer-M COOH']
+    saved = data.m_to_dict(with_root_def=True)
+    with open(tmp_path / 'rec.archive.yaml', 'w') as f:
+        yaml.dump({'data': saved}, f)
+    again = process()
+    assert batch_ids(again) == ['nh2', 'cooh']
+    assert again.m_to_dict(with_root_def=True) == saved
+
+
+@pytest.mark.parametrize('entry_type', WITH_OBJECTIVE)
+def test_particles_are_taken_from_the_particle_samples(
+    tmp_path, process_entry, stored_archives_context, kwargs_logger, entry_type
+):
+    write_measurement(tmp_path, entry_type, samples=[particle('m270')])
+    context = stored_archives_context(tmp_path, INVENTORY)
+
+    data = process_entry(
+        tmp_path, 'rec.archive.yaml', logger=kwargs_logger, context=context
+    ).data
+
+    assert batch_ids(data) == ['m270']
+    assert [parse_reference(s.reference)[1] for s in data.samples] == ['m270']
+
+
+def test_reprocessing_keeps_the_picked_particles(
+    tmp_path, stored_archives, process_entry, stored_archives_context, kwargs_logger
+):
+    write_video(tmp_path / 'rec.h5', {**recording(ID_A), 'particles': 'M270'})
+    written = parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+    processed = {
+        **written,
+        'particle_batches': [inventory_reference('cooh')],
+        'samples': [particle('cooh')],
+    }
+    stored_archives({get_entry_id('test_upload', 'rec.h5.archive.yaml'): processed})
+
+    reparsed = parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+    assert reparsed['particle_batches'] == [inventory_reference('cooh')]
+    context = stored_archives_context(tmp_path, INVENTORY)
+    data = process_entry(
+        tmp_path, 'rec.h5.archive.yaml', logger=kwargs_logger, context=context
+    ).data
+    assert batch_ids(data) == ['cooh']
+    particles = [
+        parse_reference(s.reference)[1]
+        for s in data.samples
+        if s.lab_id in ('M270', 'COOH')
+    ]
+    assert particles == ['cooh']
+
+
+def test_tracks_take_the_picked_particles_from_the_video_entry(
+    tmp_path, stored_archives_context
+):
+    write_video(tmp_path / 'rec.h5', recording(ID_A))
+    write_tracks(tmp_path / 'rec_trajs.h5', make_tracks(), recording(ID_A))
+    video = parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+    video['particle_batches'] = [inventory_reference('nh2')]
+    video['samples'] = [particle('m270')]
+    with open(tmp_path / 'rec.h5.archive.yaml', 'w') as f:
+        yaml.dump({'data': video}, f)
+    context = stored_archives_context(tmp_path, INVENTORY)
+
+    tracks = parse(ParticleTrackingParser(), tmp_path, 'rec_trajs.h5', context)
+
+    assert lab_ids(tracks['samples']) == ['NH2']
+    assert 'particle_batches' not in tracks

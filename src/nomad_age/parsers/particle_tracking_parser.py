@@ -511,19 +511,40 @@ def link_particles_and_objective(entry, attrs: dict) -> None:
             entry.instruments.append(InstrumentReference(name=lab_id, lab_id=lab_id))
 
 
-def video_samples_and_instruments(archive: EntryArchive, rel_video: str):
+def video_samples_and_instruments(archive: EntryArchive, rel_video: str, logger):
     """Samples and instruments of the entry of a video (upload-relative path), as
-    stored in its YAML; None if the video has no entry."""
+    its normalizer makes them from its YAML; None if the video has no entry.
+
+    A save in the GUI stores the chip and objective picked there next to the
+    samples and instruments from before; the normalizer, and so this, replaces
+    the chip (by its coating at the datetime of the video) and the particles among
+    the samples and
+    the objective among the instruments."""
     entry_file = f'{rel_video}.archive.yaml'
     if not archive.m_context.raw_path_exists(entry_file):
         return None
     with archive.m_context.raw_file(entry_file) as f:
         data = yaml.load(f, Loader=YAML_LOADER).get('data') or {}
-    samples = data.get('samples') or []
-    instruments = data.get('instruments') or []
+    synced = (
+        'chip',
+        'datetime',
+        'samples',
+        'particle_batches',
+        'objective',
+        'instruments',
+    )
+    video = AGE_ParticleTransportVideo.m_from_dict(
+        {key: data[key] for key in synced if data.get(key)},
+        m_context=archive.m_context,
+    )
+    video.link_chip(archive, logger)
+    if video.particle_batches:
+        video.link_particles(logger)
+    if video.objective is not None:
+        video.link_objective(logger)
     return (
-        [CompositeSystemReference.m_from_dict(sample) for sample in samples],
-        [InstrumentReference.m_from_dict(instrument) for instrument in instruments],
+        [CompositeSystemReference.m_from_dict(s.m_to_dict()) for s in video.samples],
+        [InstrumentReference.m_from_dict(i.m_to_dict()) for i in video.instruments],
     )
 
 
@@ -687,7 +708,7 @@ class ParticleTrackingParser(MatchingParser):
                 archive.metadata.upload_id, f'{rel_video}.archive.yaml'
             )
             parsed_wins = ('video',)
-            from_video = video_samples_and_instruments(archive, rel_video)
+            from_video = video_samples_and_instruments(archive, rel_video, logger)
         if from_video is None:
             link_AGE_samples(entry, chip_ids_from_filename(mainfile), archive, logger)
             link_particles_and_objective(entry, entry.camera_settings or {})

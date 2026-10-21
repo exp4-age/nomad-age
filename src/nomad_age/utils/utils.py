@@ -19,6 +19,10 @@ LAB_TIMEZONE = ZoneInfo('Europe/Berlin')
 
 # Chips: one central upload holds all AGE_Sample entries; parsers only link them.
 AGE_SAMPLE_SCHEMA = 'nomad_age.schema_packages.age_schema.AGE_Sample'
+# A chip in one coated state; it references its chip (AGE_Sample).
+AGE_COATED_SAMPLE_SCHEMA = 'nomad_age.schema_packages.age_schema.AGE_CoatedSample'
+# A chip has far fewer coated states (spacer layers) than this.
+MAX_COATED_SAMPLES = 1000
 # Base section of all magnetisation measurements (L-MOKE, V-MOKE, ...); NOMAD indexes
 # the base sections of an entry's data, so one filter finds every technique.
 AGE_MAGNETISATION_SCHEMA = (
@@ -289,6 +293,25 @@ def find_chip_reference(lab_id: str, archive, logger) -> Optional[str]:
         logger.error(f'Found {len(hits)} AGE samples with lab_id {lab_id}; not linked.')
         return None
     return f'{get_reference(hits[0]["upload_id"], hits[0]["entry_id"])}#data'
+
+
+def find_coated_samples(chip_entry_id: str, user_id=None) -> list:
+    """(upload id, entry id) of the coated chips (AGE_CoatedSample) that reference
+    the chip entry `chip_entry_id` and that the user with `user_id` sees, in any
+    upload."""
+    from nomad.search import MetadataPagination, MetadataRequired, search
+
+    results = search(
+        owner='visible',
+        user_id=user_id,
+        query={
+            'entry_references.target_entry_id': chip_entry_id,
+            'section_defs.definition_qualified_name': AGE_COATED_SAMPLE_SCHEMA,
+        },
+        required=MetadataRequired(include=['entry_id', 'upload_id']),
+        pagination=MetadataPagination(page_size=MAX_COATED_SAMPLES),
+    )
+    return [(hit['upload_id'], hit['entry_id']) for hit in results.data]
 
 
 def get_referencing_entries(archive: ArchiveSection) -> list:
