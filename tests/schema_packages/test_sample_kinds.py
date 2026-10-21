@@ -39,6 +39,7 @@ ARCHIVES = {
         'chip': reference(UPLOAD_ID, 'chip'),
         'spacer_thickness': 3369.25,
         'spacer_thickness_uncertainty': 36.9,
+        'date_coated': '2025-03-12T00:00:00+00:00',
     },
     (PARTICLES_UPLOAD_ID, 'pmma3'): {
         'm_def': f'{SCHEMA}.age_schema.AGE_CoatedSample',
@@ -71,6 +72,23 @@ COATED_CHIP = {
 }
 
 RECORDINGS = ['AGE_ParticleTracking', 'AGE_ParticleTransportVideo', 'AGE_FocusSweep']
+# Videos and focus sweeps link the coated chip of their chip at their datetime.
+WITH_CHIP = RECORDINGS[1:]
+
+
+def index_coated_chips(fake_index):
+    """Make the coated chips of ARCHIVES searchable by the chip they reference."""
+    for (upload_id, entry_id), data in ARCHIVES.items():
+        if data['m_def'].endswith('AGE_CoatedSample'):
+            chip_entry_id = data['chip'].split('/')[-1].split('#')[0]
+            fake_index.docs.append(
+                {
+                    'upload_id': upload_id,
+                    'entry_id': entry_id,
+                    'entry_references': [{'target_entry_id': chip_entry_id}],
+                    'section_defs': [{'definition_qualified_name': data['m_def']}],
+                }
+            )
 
 
 def write_entry(directory, entry_file, entry_type, **data):
@@ -103,15 +121,31 @@ def test_samples_are_listed_as_particles_and_chips(
     assert names(data.particles) == ['M270 batch 3']  # the name of the entry
     assert names(data.chips) == ['2023_0418', '2023_0325_1']  # lab_id if unnamed
     assert data.spacer_thickness is None  # no coated chip
-    assert not warnings(caplog)
+    if entry_type in WITH_CHIP:
+        # which of the two chips is meant is not guessed
+        assert data.chip is None
+        assert warnings(caplog) == [
+            'Samples 2023_0418, 2023_0325_1 are on 2 different chips; chip not set, '
+            'samples left as they are'
+        ]
+    else:
+        assert not warnings(caplog)
 
 
 @pytest.mark.parametrize('entry_type', RECORDINGS)
 def test_coated_chip_lists_its_chip_and_spacer_thickness(
-    tmp_path, process_entry, stored_archives_context, caplog, entry_type
+    tmp_path, process_entry, stored_archives_context, fake_index, caplog, entry_type
 ):
+    index_coated_chips(fake_index)
     samples = [SAMPLES[0], COATED_CHIP]
-    write_entry(tmp_path, 'rec.archive.yaml', entry_type, name='rec', samples=samples)
+    write_entry(
+        tmp_path,
+        'rec.archive.yaml',
+        entry_type,
+        name='rec',
+        datetime='2025-06-02T10:00:00+00:00',  # while PMMA2 is on the chip
+        samples=samples,
+    )
     context = stored_archives_context(tmp_path, ARCHIVES)
 
     data = process_entry(tmp_path, 'rec.archive.yaml', context=context).data
@@ -216,11 +250,12 @@ def test_samples_that_cannot_be_loaded_are_left_out_with_a_warning(
 def test_values_from_samples_are_recomputed_on_each_normalize(
     tmp_path, process_entry, stored_archives_context
 ):
-    # e.g. a save in the GUI wrote them before samples were edited
+    # e.g. a save in the GUI wrote them before samples were edited (a tracks
+    # entry: a video links the chip of its chip quantity again, see test_chip_link)
     write_entry(
         tmp_path,
         'rec.archive.yaml',
-        'AGE_ParticleTransportVideo',
+        'AGE_ParticleTracking',
         name='rec',
         samples=[SAMPLES[0], COATED_CHIP],
         particles=[{'name': 'M450 batch 1'}],
@@ -256,11 +291,12 @@ def test_instruments_are_named_after_their_entry(
     instruments = [
         # NOMAD names it after the lab_id; the entry name replaces that
         {'lab_id': 'OBJ-20x', 'reference': reference(UPLOAD_ID, 'objective')},
-        # a name set by hand is kept
+        # a name set by hand is kept (a second objective would be replaced by the
+        # objective of videos and focus sweeps)
         {
-            'name': 'my objective',
-            'lab_id': 'OBJ-20x',
-            'reference': reference(UPLOAD_ID, 'objective'),
+            'name': 'my holder',
+            'lab_id': '2023_0418',
+            'reference': reference(UPLOAD_ID, 'chip'),
         },
         # entry has no name: the lab_id stays
         {'lab_id': '2023_0325_1', 'reference': reference(UPLOAD_ID, 'unnamed_chip')},
@@ -272,5 +308,5 @@ def test_instruments_are_named_after_their_entry(
 
     data = process_entry(tmp_path, 'rec.archive.yaml', context=context).data
 
-    assert names(data.instruments) == ['Objective 20x', 'my objective', '2023_0325_1']
+    assert names(data.instruments) == ['Objective 20x', 'my holder', '2023_0325_1']
     assert not warnings(caplog)

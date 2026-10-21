@@ -23,6 +23,33 @@ filter by them. They are filled from `samples` each time the entry is processed
 and are not stored in the entry files; a sample whose entry cannot be loaded is
 left out with a warning.
 
+Videos and focus sweeps pick their microscope objective (an `AGE_Objective`
+entry) in `objective`, a dropdown on the overview page. `instruments` stays the
+one list the search apps filter by and the tracks entries take over, and follows
+it: on processing, the instruments that link an objective are replaced by one
+that links `objective` (other instruments stay). An empty `objective` is filled
+from the first objective among the instruments, e.g. the one the parser links
+from the `objective` attribute of the video. A picked objective stays when the
+file is processed again, whatever its attribute says; to remove the objective,
+clear `objective` and remove it from `instruments`.
+
+They pick their chip the same way: `chip`, a dropdown of bare chips
+(`AGE_Sample`). The coating is not picked, as the dropdown cannot filter by date:
+`coating` (read-only) is derived on every processing as the `AGE_CoatedSample` of
+that chip whose layer was on it at the `datetime` of the measurement
+(`date_coated` ≤ datetime < `date_removed`; no `date_removed`: still on), so
+layers entered later are picked up on reprocessing. A date without time counts as
+the whole lab day; on the day one layer is removed and the next coated, the newer
+one is taken with a warning. `samples` follows: the samples that link a chip or a
+coated chip are replaced by one that links the coating, or the bare chip if no
+layer was on it then, or if the measurement has no datetime (both with a
+warning); particles and other samples stay. An empty `chip` is filled from the
+samples (the linked chip, or the chip of the linked coated chip), e.g. the chip
+the parser links from the file name; if they link several chips nothing changes,
+with a warning. If the coated chips cannot be looked up, the samples stay as they
+are. A picked chip stays when the file is processed again, and the tracks
+entries take over the synced samples.
+
 The entries are written next to the files as `<file>.archive.yaml`. The entry of
 the original file itself (`AGE_RawFile`, named after the file) records it for
 archival: upload-relative path (`file_name`), `file_type`, `file_size`, `sha256`
@@ -58,7 +85,9 @@ layer is an ELN entry "Coated chip" (`AGE_CoatedSample`) with lab_id
 `<chip>_PMMA<n>`: it references its `chip` and holds `spacer_thickness` ± its
 uncertainty (standard error of the mean over the profilometry points on a
 scratch in the layer), `date_coated` and `date_removed`. Recordings link the
-coated chip they were measured on under samples, by its lab_id or a reference.
+coated chip they were measured on under samples, by its lab_id or a reference;
+videos and focus sweeps link it from their `chip` and `datetime` (see above), so
+the dates decide which layer a recording gets.
 
 A "Spin coating" entry (`AGE_SpinCoating`) documents how a layer was made:
 resist, spin speed and acceleration, spin time, layers, bake temperature and time;

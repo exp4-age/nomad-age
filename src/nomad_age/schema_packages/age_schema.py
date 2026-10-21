@@ -384,7 +384,9 @@ class AGE_CoatedSample(CompositeSystem, EntryData):
             'A chip (AGE Sample) with a spacer layer, e.g. PMMA, spin coated on it. '
             'Each layer is an entry of its own: once it is removed and a new one is '
             'coated, the chip gets a new coated chip entry. Recordings link the '
-            'coated chip they were measured on under samples. Name its lab_id '
+            'coated chip they were measured on under samples; videos and focus '
+            'sweeps find it by their chip and datetime between date_coated and '
+            'date_removed. Name its lab_id '
             '<chip>_PMMA<n>, e.g. 2023_0418_PMMA2 for the second PMMA layer of '
             'chip 2023_0418.'
         ),

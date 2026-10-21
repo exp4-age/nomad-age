@@ -1,4 +1,5 @@
 import os
+from datetime import date, datetime, time
 
 from nomad.datamodel.data import ArchiveSection, EntryData
 from nomad.datamodel.metainfo.annotations import (
@@ -9,6 +10,8 @@ from nomad.datamodel.metainfo.annotations import (
 )
 from nomad.datamodel.metainfo.basesections import (
     Analysis,
+    CompositeSystemReference,
+    InstrumentReference,
     Measurement,
     SectionReference,
 )
@@ -16,6 +19,7 @@ from nomad.datamodel.metainfo.plot import PlotSection
 from nomad.metainfo import (
     JSON,
     MEnum,
+    MProxy,
     Quantity,
     SchemaPackage,
     Section,
@@ -25,11 +29,19 @@ from nomad.metainfo import (
 from nomad_age.schema_packages.age_schema import (
     AGE_CoatedSample,
     AGE_FromRawFile,
+    AGE_Objective,
     AGE_Particles,
     AGE_Sample,
     resolved,
 )
-from nomad_age.utils.utils import get_hash_ref
+from nomad_age.utils.utils import (
+    LAB_TIMEZONE,
+    as_utc,
+    find_coated_samples,
+    get_hash_ref,
+    get_reference,
+    parse_reference,
+)
 
 m_package = SchemaPackage(name='particle_tracking_schema')
 
@@ -66,6 +78,409 @@ class AGE_SampleName(ArchiveSection):
         type=str,
         description='Name of the linked entry, or the lab_id of the sample.',
     )
+
+
+def links_objective(reference) -> bool:
+    """Whether a reference value links an Objective entry; False if the entry
+    cannot be loaded."""
+    try:
+        return isinstance(resolved(reference), AGE_Objective)
+    except Exception:
+        return False  # name_instruments reports entries that do not load
+
+
+def linked_entry(reference):
+    """(upload id, entry id) of the entry that a reference value links, or the
+    linked section if the value names no entry; None if it cannot be loaded."""
+    ids = parse_reference(reference)
+    if ids is not None or reference is None:
+        return ids
+    try:
+        target = resolved(reference)
+    except Exception:
+        return None
+    metadata = getattr(target.m_root(), 'metadata', None)
+    if metadata is not None and metadata.entry_id:
+        return (metadata.upload_id, metadata.entry_id)
+    return target
+
+
+def reference_value(reference):
+    """A reference value to set on another quantity: the text it was given as
+    (e.g. ../uploads/<upload>/archive/<entry>#data), else the linked section."""
+    return getattr(reference, 'm_proxy_value', None) or reference
+
+
+def entry_reference(ids: tuple) -> str:
+    """Reference to the data of the entry with (upload id, entry id) `ids`."""
+    return f'{get_reference(*ids)}#data'
+
+
+def replace_links(links: list, replaced: list, kept) -> list:
+    """`links` with `kept` in place of the first of the `replaced` ones (at the end
+    if none is among them) and without the other `replaced` ones."""
+    result = []
+    for link in links:
+        if link not in replaced:
+            result.append(link)
+        elif kept not in result:
+            result.append(kept)
+    if kept not in result:
+        result.append(kept)
+    return result
+
+
+class AGE_ObjectiveLink(ArchiveSection):
+    """A measurement whose objective is picked on its overview page.
+
+    objective is the user's choice; instruments, which the search apps filter by
+    and the tracks entries of a video take over, follow it. AGE_Measurement
+    syncs the two on normalize, see link_objective.
+    """
+
+    objective = Quantity(
+        type=AGE_Objective,
+        description=(
+            'The microscope objective entry (Inventory) used for this measurement. '
+            'Instruments link the same entry: picking another objective here '
+            'replaces the objective among the instruments. Filled from the '
+            'instruments (e.g. the objective attribute of the file) if empty; a '
+            'choice made here stays when the file is processed again.'
+        ),
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.ReferenceEditQuantity, label='Objective'
+        ),
+    )
+
+    def link_objective(self, logger) -> None:
+        """Make instruments link exactly the objective of `objective`.
+
+        With objective set, the instruments that link an Objective entry are
+        replaced by one that links it (an existing one that links it already is
+        kept); other instruments stay. Without objective, it is taken from the
+        first instrument that links an Objective entry: one the parser linked
+        from the objective attribute of the file, or one of an older entry.
+        """
+        if isinstance(self.objective, MProxy) and '/' not in str(
+            self.objective.m_proxy_value
+        ):
+            logger.warning(
+                f'Objective {self.objective.m_proxy_value!r} is text, not an '
+                'Objective entry (as entries stored it before objectives were '
+                'entries); dropped'
+            )
+            self.objective = None
+        objectives = [i for i in self.instruments if links_objective(i.reference)]
+        if self.objective is None:
+            if not objectives:
+                return
+            self.objective = reference_value(objectives[0].reference)
+        try:
+            target = resolved(self.objective)
+        except Exception as e:
+            logger.warning(f'Objective not loaded: {e!r}; instruments left as they are')
+            return
+        if not isinstance(target, AGE_Objective):
+            logger.warning(
+                'Objective links no Objective entry; instruments left as they are'
+            )
+            return
+        wanted = linked_entry(self.objective)
+        objectives += [
+            i
+            for i in self.instruments
+            if i not in objectives and linked_entry(i.reference) == wanted
+        ]
+        kept = next(
+            (i for i in objectives if linked_entry(i.reference) == wanted), None
+        )
+        if kept is None:
+            # named after the entry by name_instruments, as linked by the parser
+            kept = InstrumentReference(
+                name=target.lab_id,
+                lab_id=target.lab_id,
+                reference=reference_value(self.objective),
+            )
+        instruments = replace_links(self.instruments, objectives, kept)
+        if [id(i) for i in instruments] != [id(i) for i in self.instruments]:
+            self.instruments = instruments
+
+
+def lab_day(moment: datetime) -> date:
+    """The date of `moment` in the time zone of the lab."""
+    return moment.astimezone(LAB_TIMEZONE).date()
+
+
+def is_date_only(moment: datetime) -> bool:
+    """Whether `moment` is midnight in UTC or lab time: a date entered without a
+    time, e.g. date_coated of a Coated chip."""
+    return any(t.time() == time(0) for t in (moment, moment.astimezone(LAB_TIMEZONE)))
+
+
+def on_chip_at(coated_sample, moment: datetime) -> bool:
+    """Whether the layer of a coated chip was on its chip at `moment`: from
+    date_coated until before date_removed, or still if date_removed is empty.
+
+    A date without a time counts as the whole day (lab time), so on the day one
+    layer is removed and the next one coated, both count. A coated chip without
+    date_coated counts never.
+    """
+    coated = as_utc(coated_sample.date_coated)
+    removed = as_utc(coated_sample.date_removed)
+    if coated is None:
+        return False
+    day = lab_day(moment)
+    if lab_day(coated) > day if is_date_only(coated) else coated > moment:
+        return False
+    if removed is None:
+        return True
+    return day <= lab_day(removed) if is_date_only(removed) else moment < removed
+
+
+def coated_sample_at(coated_samples: list, moment: datetime, chip_name, logger):
+    """The (reference, section) among `coated_samples` whose layer was on the chip
+    at `moment`; the newest one, with a warning, if several were (on the day one
+    is removed and the next one coated); None, with a warning, if none was."""
+    on_chip = [(ref, c) for ref, c in coated_samples if on_chip_at(c, moment)]
+    if not on_chip:
+        logger.warning(
+            f'None of the {len(coated_samples)} coated chips of chip {chip_name} '
+            f'was on it at {moment:%Y-%m-%d %H:%M} UTC, the datetime of the '
+            'measurement; the bare chip is linked as sample'
+        )
+        return None
+    newest = max(on_chip, key=lambda rc: (as_utc(rc[1].date_coated), rc[0]))
+    if len(on_chip) > 1:
+        listed = ', '.join(c.lab_id or c.name or ref for ref, c in on_chip)
+        logger.warning(
+            f'Coated chips {listed} of chip {chip_name} were all on it on '
+            f'{lab_day(moment)}, the day of the measurement (by date); the newest, '
+            f'{newest[1].lab_id or newest[1].name or newest[0]}, is linked as sample'
+        )
+    return newest
+
+
+class AGE_ChipLink(ArchiveSection):
+    """A measurement whose chip is picked on its overview page.
+
+    chip is the user's choice of the bare chip (AGE_Sample). Its coating at the
+    time of the measurement, the Coated chip whose layer was on it then, is
+    derived from date_coated and date_removed and linked under samples, which the
+    search apps filter by and the tracks entries of a video take over. A coating
+    is not picked directly: NOMAD's reference dropdown cannot filter by date, so
+    it would offer layers that did not exist at the time. AGE_Measurement syncs
+    chip, coating and samples on normalize, see link_chip.
+    """
+
+    chip = Quantity(
+        type=AGE_Sample,
+        description=(
+            'The chip (AGE Sample) measured on. Samples link its coated chip of the '
+            'time of the measurement (datetime), or the bare chip if no layer was on '
+            'it then: picking another chip here replaces the chip among the '
+            'samples. Filled from the samples if empty; a choice made here stays '
+            'when the file is processed again.'
+        ),
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.ReferenceEditQuantity, label='Chip'
+        ),
+    )
+
+    coating = Quantity(
+        type=AGE_CoatedSample,
+        description=(
+            'The coated chip of chip at the datetime of the measurement, between its '
+            'date_coated and date_removed; empty if no layer was on the chip then. '
+            'Derived on processing; pick the chip or edit the dates of the Coated '
+            'chip entries instead.'
+        ),
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.ReferenceEditQuantity, label='Coating'
+        ),
+    )
+
+    def link_chip(self, archive, logger) -> None:
+        """Make the samples link exactly the coated chip (or the bare chip) of
+        `chip` at the datetime of the measurement, and set coating to it.
+
+        With chip set, the samples that link a chip (AGE Sample) or a coated chip
+        are replaced by one that links it (an existing one that links it already
+        is kept); other samples, e.g. particles, stay. Without chip, it is taken
+        from the samples: the chip they link directly or as chip of a coated chip;
+        if they link several chips, nothing changes. Without datetime the bare
+        chip is linked. If the chip or its coated chips cannot be looked up, the
+        samples stay as they are.
+        """
+        self.coating = None
+        linked = []  # samples that link a chip or coated chip, and their chip
+        for sample in self.samples:
+            try:
+                target = resolved(sample.reference)
+            except Exception:
+                continue  # list_samples_by_kind reports it
+            if isinstance(target, AGE_Sample):
+                linked.append((sample, linked_entry(sample.reference)))
+            elif isinstance(target, AGE_CoatedSample):
+                linked.append((sample, linked_entry(target.chip)))
+        if self.chip is None:
+            chips = unique(ids for _, ids in linked if isinstance(ids, tuple))
+            if not chips:
+                return
+            if len(chips) > 1:
+                listed = ', '.join(unique(s.lab_id or s.name for s, _ in linked))
+                logger.warning(
+                    f'Samples {listed} are on {len(chips)} different chips; chip not '
+                    'set, samples left as they are'
+                )
+                return
+            self.chip = entry_reference(chips[0])
+        try:
+            chip = resolved(self.chip)
+        except Exception as e:
+            logger.warning(f'Chip not loaded: {e!r}; samples left as they are')
+            return
+        chip_ids = linked_entry(self.chip)
+        if not isinstance(chip, AGE_Sample) or not isinstance(chip_ids, tuple):
+            logger.warning('Chip links no AGE Sample entry; samples left as they are')
+            return
+        chip_name = chip.lab_id or chip.name
+        wanted = (entry_reference(chip_ids), chip)
+        moment = as_utc(self.datetime)
+        if moment is None:
+            logger.warning(
+                f'The measurement has no datetime, so the coating of chip '
+                f'{chip_name} at its time is unknown; the bare chip is linked as '
+                'sample'
+            )
+        else:
+            try:
+                coated_samples = coated_samples_of(chip_ids, archive)
+            except Exception as e:
+                logger.warning(
+                    f'Coated chips of chip {chip_name} not looked up: {e!r}; samples '
+                    'left as they are'
+                )
+                return
+            wanted = (
+                coated_sample_at(coated_samples, moment, chip_name, logger) or wanted
+            )
+        reference, target = wanted
+        wanted_ids = parse_reference(reference)
+        kept = next(
+            (s for s, _ in linked if linked_entry(s.reference) == wanted_ids), None
+        )
+        if kept is None:
+            kept = CompositeSystemReference(
+                name=target.lab_id or target.name,
+                lab_id=target.lab_id,
+                reference=reference,
+            )
+        samples = replace_links(self.samples, [s for s, _ in linked], kept)
+        if [id(s) for s in samples] != [id(s) for s in self.samples]:
+            self.samples = samples
+        if isinstance(target, AGE_CoatedSample):
+            self.coating = reference
+
+
+class AGE_ParticlesLink(ArchiveSection):
+    """A measurement whose particle batches are picked on its overview page.
+
+    particle_batches is the user's choice; the samples, which the search apps
+    filter by and the tracks entries of a video take over, follow it.
+    AGE_Measurement syncs the two on normalize, see link_particles.
+    """
+
+    particle_batches = Quantity(
+        type=AGE_Particles,
+        shape=['*'],
+        description=(
+            'The particle batch entries (Inventory) used for this measurement; '
+            'several for a mix. Samples link the same entries: picking other '
+            'batches here replaces the particles among the samples. Filled from '
+            'the samples (e.g. the particles attribute of the file) if empty; a '
+            'choice made here stays when the file is processed again.'
+        ),
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.ReferenceEditQuantity, label='Particles'
+        ),
+    )
+
+    def link_particles(self, logger) -> None:
+        """Make the samples link exactly the batches of `particle_batches`.
+
+        With batches picked, the samples that link a particle entry are replaced
+        by one per picked batch, in its order (an existing one that links it
+        already is kept); other samples, e.g. the chip, stay. Without batches,
+        they are taken from the samples that link a particle entry. If a picked
+        batch cannot be loaded, the samples stay as they are.
+        """
+        linked = []
+        for sample in self.samples:
+            try:
+                if isinstance(resolved(sample.reference), AGE_Particles):
+                    linked.append(sample)
+            except Exception:
+                continue  # list_samples_by_kind reports it
+        picked = list(self.particle_batches or [])
+        if not picked:
+            if linked:
+                self.particle_batches = unique(
+                    reference_value(s.reference) for s in linked
+                )
+            return
+        wanted = []  # (entry ids, reference, section), no duplicates
+        for batch in picked:
+            try:
+                target = resolved(batch)
+            except Exception as e:
+                logger.warning(f'Particles not loaded: {e!r}; samples left as they are')
+                return
+            if not isinstance(target, AGE_Particles):
+                logger.warning(
+                    'Particles link no particle entry; samples left as they are'
+                )
+                return
+            ids = linked_entry(batch)
+            if all(ids != w[0] for w in wanted):
+                wanted.append((ids, reference_value(batch), target))
+        kept = []
+        for ids, reference, target in wanted:
+            sample = next((s for s in linked if linked_entry(s.reference) == ids), None)
+            if sample is None:
+                sample = CompositeSystemReference(
+                    name=target.lab_id or target.name,
+                    lab_id=target.lab_id,
+                    reference=reference,
+                )
+            kept.append(sample)
+        samples, placed = [], False
+        for sample in self.samples:
+            if sample not in linked:
+                samples.append(sample)
+            elif not placed:
+                samples.extend(kept)
+                placed = True
+        if not placed:
+            samples.extend(kept)
+        if [id(x) for x in samples] != [id(x) for x in self.samples]:
+            self.samples = samples
+        if len(wanted) != len(picked):
+            self.particle_batches = [reference for _, reference, _ in wanted]
+
+
+def coated_samples_of(chip_ids: tuple, archive) -> list:
+    """(reference, section) of the coated chips of the chip entry with (upload
+    id, entry id) `chip_ids` that the main author of `archive` sees. Raises if
+    the search or loading one of them fails."""
+    main_author = archive.metadata.main_author if archive.metadata else None
+    user_id = main_author.user_id if main_author else None
+    coated_samples = []
+    for ids in find_coated_samples(chip_ids[1], user_id):
+        upload_id, entry_id = ids
+        data = archive.m_context.load_archive(entry_id, upload_id, None).data
+        if isinstance(data, AGE_CoatedSample) and linked_entry(data.chip) == chip_ids:
+            coated_samples.append((entry_reference(ids), data))
+    return coated_samples
 
 
 class AGE_Measurement(Measurement):
@@ -109,8 +524,16 @@ class AGE_Measurement(Measurement):
     )
 
     def normalize(self, archive, logger):
+        # before the base normalizer, which makes the workflow inputs of the
+        # samples and sets an empty datetime to now
+        if isinstance(self, AGE_ChipLink):
+            self.link_chip(archive, logger)
+        if isinstance(self, AGE_ParticlesLink):
+            self.link_particles(logger)
         super().normalize(archive, logger)
         self.list_samples_by_kind(logger)
+        if isinstance(self, AGE_ObjectiveLink):
+            self.link_objective(logger)
         self.name_instruments(logger)
 
     def name_instruments(self, logger) -> None:
@@ -198,11 +621,15 @@ def unique(names) -> list:
     return [name for name in dict.fromkeys(names) if name]
 
 
-# Normalizer output of AGE_Measurement, which the entry files do not store.
-FROM_SAMPLES = tuple(
-    name
-    for name in AGE_Measurement.m_def.all_properties
-    if name not in Measurement.m_def.all_properties
+# Normalizer output of AGE_Measurement and AGE_ChipLink, which the entry files do
+# not store.
+FROM_SAMPLES = (
+    *(
+        name
+        for name in AGE_Measurement.m_def.all_properties
+        if name not in Measurement.m_def.all_properties
+    ),
+    'coating',
 )
 
 
@@ -265,19 +692,30 @@ class AGE_ParticleTransport(
     )
 
 
-class AGE_ParticleTransportVideo(AGE_ParticleTransport, EntryData):
+class AGE_ParticleTransportVideo(
+    AGE_ParticleTransport, AGE_ChipLink, AGE_ParticlesLink, AGE_ObjectiveLink, EntryData
+):
     m_def = Section(
         label='Particle Transport Video',
         description=(
             'Camera video of a particle transport experiment, as saved by '
             'harvesters_pg (HDF5 with a frames dataset). Particles and objective '
-            'come from its attributes particles and objective or are added here; '
-            'the tracks entries of the recording take over its samples and '
-            'instruments.'
+            'come from its attributes particles and objective or are picked here '
+            '(Particles, Objective); the chip comes from the file name or is picked '
+            'here (Chip), its coating at the time of the video is derived. The '
+            'tracks entries of the recording take over its samples and instruments.'
         ),
         a_eln=ELNAnnotation(
             properties=SectionProperties(
                 editable=dict(exclude=['lab_id', 'video_file', *FROM_SAMPLES]),
+                order=[
+                    'name',
+                    'datetime',
+                    'chip',
+                    'coating',
+                    'particle_batches',
+                    'objective',
+                ],
             )
         ),
     )
@@ -460,7 +898,14 @@ class AGE_TrajectoryFiltering(Analysis, EntryData):
 
 
 class AGE_FocusSweep(
-    AGE_ParticleMicroscopy, AGE_FromRawFile, PlotSection, AGE_Measurement, EntryData
+    AGE_ParticleMicroscopy,
+    AGE_FromRawFile,
+    PlotSection,
+    AGE_Measurement,
+    AGE_ChipLink,
+    AGE_ParticlesLink,
+    AGE_ObjectiveLink,
+    EntryData,
 ):
     m_def = Section(
         label='Focus Sweep',
@@ -472,6 +917,14 @@ class AGE_FocusSweep(
             properties=SectionProperties(
                 visible=Filter(exclude=['lab_id']),
                 editable=dict(exclude=['data_file', *FROM_SAMPLES]),
+                order=[
+                    'name',
+                    'datetime',
+                    'chip',
+                    'coating',
+                    'particle_batches',
+                    'objective',
+                ],
             )
         ),
     )
