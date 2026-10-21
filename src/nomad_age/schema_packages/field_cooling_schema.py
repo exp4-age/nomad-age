@@ -53,9 +53,82 @@ class AGE_FieldCooling(PlotSection, AGE_FromRawFile, Process, EntryData):
     cooling_rate = Quantity(
         type=float,
         unit='°C / minute',
-        description='Cooling rate',
+        description=(
+            'Cooling rate set in the log; 0 means natural cooling (heater off, '
+            'no added cooling).'
+        ),
         a_eln=ELNAnnotation(component=ELNComponentEnum.NumberEditQuantity),
         a_display={'unit': '°C / minute'},
+    )
+
+    cooling_mode = Quantity(
+        type=str,
+        description=(
+            "'natural' if the set cooling rate is 0 (heater off, no added "
+            "cooling), else 'controlled'."
+        ),
+    )
+
+    field_source = Quantity(
+        type=str,
+        default='permanent magnet',
+        description='What applies the magnetic field during cooling.',
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.StringEditQuantity, label='Field source'
+        ),
+    )
+
+    field_direction = Quantity(
+        type=str,
+        description=(
+            'Direction of the field relative to the chip, e.g. "in-plane, along '
+            'the conductor lines" or "out of plane".'
+        ),
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.StringEditQuantity, label='Field direction'
+        ),
+    )
+
+    field_strength = Quantity(
+        type=float,
+        unit='mT',
+        description='Magnetic field at the sample, if known (not measured so far).',
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.NumberEditQuantity,
+            label='Field strength',
+            defaultDisplayUnit='mT',
+        ),
+    )
+
+    max_temperature = Quantity(
+        type=float,
+        unit='°C',
+        description='Highest measured temperature (from the data).',
+    )
+
+    measured_plateau_duration = Quantity(
+        type=float,
+        unit='minute',
+        description=(
+            'Time the measured temperature was within ±5 K of the blocking '
+            'temperature (from the data).'
+        ),
+    )
+
+    measured_cooling_rate = Quantity(
+        type=float,
+        unit='°C / minute',
+        description=(
+            'Mean cooling rate from the end of the plateau (last point within '
+            '±5 K of the blocking temperature) to the end of the log (from the '
+            'data). Natural cooling is not linear: fast at first, slow at the end.'
+        ),
+    )
+
+    min_penning_pressure = Quantity(
+        type=float,
+        unit='mbar',
+        description='Lowest Penning pressure (from the data).',
     )
 
     time = Quantity(
