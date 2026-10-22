@@ -110,7 +110,7 @@ def errors(caplog) -> list:
 
 
 @pytest.mark.parametrize('entry_type', RECORDINGS)
-def test_samples_are_listed_as_particles_and_chips(
+def test_particles_among_the_samples_are_moved_and_chips_listed(
     tmp_path, process_entry, stored_archives_context, caplog, entry_type
 ):
     write_entry(tmp_path, 'rec.archive.yaml', entry_type, name='rec', samples=SAMPLES)
@@ -119,6 +119,11 @@ def test_samples_are_listed_as_particles_and_chips(
     data = process_entry(tmp_path, 'rec.archive.yaml', context=context).data
 
     assert names(data.particles) == ['M270 batch 3']  # the name of the entry
+    # particles are no samples: they move to particle_batches, once
+    assert [b.m_proxy_value.split('#')[0] for b in data.particle_batches] == [
+        reference(PARTICLES_UPLOAD_ID, 'm270').split('#')[0]
+    ]
+    assert 'M270-2024-03' not in [s.lab_id for s in data.samples]
     assert names(data.chips) == ['2023_0418', '2023_0325_1']  # lab_id if unnamed
     assert data.spacer_thickness is None  # no coated chip
     if entry_type in WITH_CHIP:
@@ -153,6 +158,7 @@ def test_coated_chip_lists_its_chip_and_spacer_thickness(
     assert names(data.particles) == ['M270 batch 3']
     assert names(data.chips) == ['2023_0418']  # the chip, not the coated chip
     assert data.spacer_thickness.to('nm').magnitude == 3369.25
+    assert data.spacer_thickness_uncertainty.to('nm').magnitude == 36.9
     assert not warnings(caplog)
 
 
@@ -276,7 +282,7 @@ def test_values_from_samples_are_recomputed_on_each_normalize(
     assert names(archive.data.chips) == ['2023_0418']
     assert archive.data.spacer_thickness.to('nm').magnitude == 3369.25
 
-    archive.data.m_remove_sub_section(type(archive.data).samples, 1)  # coated chip
+    archive.data.m_remove_sub_section(type(archive.data).samples, 0)  # coated chip
     archive.data.normalize(archive, logger)
 
     assert names(archive.data.particles) == ['M270 batch 3']

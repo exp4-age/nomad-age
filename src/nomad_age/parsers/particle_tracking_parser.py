@@ -25,12 +25,15 @@ from nomad_age.schema_packages.particle_tracking_schema import (
     AGE_FocusSweep,
     AGE_ParticleTracking,
     AGE_ParticleTransportVideo,
+    reference_value,
+    unique,
 )
 from nomad_age.utils.fingerprint import file_fingerprint
 from nomad_age.utils.utils import (
     YAML_LOADER,
     create_archive,
     find_chip_reference,
+    find_particles_reference,
     get_entry_id,
     get_hash_ref,
     lab_time_to_utc,
@@ -456,7 +459,7 @@ def build_video_entry(path: str, rel_path: str) -> AGE_ParticleTransportVideo:
         datetime=parse_timestamp(attrs.get('timestamp')) or time_from_filename(path),
         camera_settings=attrs or None,
     )
-    link_particles_and_objective(entry, attrs)
+    link_objective_from_attrs(entry, attrs)
     if first_frame is not None:
         entry.illumination = guess_illumination(first_frame)
         figure = plot_frame(first_frame, f'First frame of {name}')
@@ -495,31 +498,46 @@ def lab_ids_from_attr(value) -> list:
     return list(dict.fromkeys(i for i in ids if i))
 
 
-def link_particles_and_objective(entry, attrs: dict) -> None:
-    """Link the particle batches and the objective that the attributes name.
+def link_objective_from_attrs(entry, attrs: dict) -> None:
+    """Link the objective that the objective attribute names.
 
-    Only the lab ids are set; when NOMAD normalizes the entry, it resolves them
-    to the inventory entries with these ids.
+    Only the lab id is set; when NOMAD normalizes the entry, it resolves it to
+    the inventory entry with this id.
     """
-    linked = {sample.lab_id for sample in entry.samples}
-    for lab_id in lab_ids_from_attr(attrs.get(PARTICLES_ATTR)):
-        if lab_id not in linked:
-            entry.samples.append(CompositeSystemReference(name=lab_id, lab_id=lab_id))
     linked = {instrument.lab_id for instrument in entry.instruments}
     for lab_id in lab_ids_from_attr(attrs.get(OBJECTIVE_ATTR)):
         if lab_id not in linked:
             entry.instruments.append(InstrumentReference(name=lab_id, lab_id=lab_id))
 
 
+def link_particles_from_attrs(entry, attrs: dict, archive: EntryArchive, logger):
+    """Fill an empty particle_batches with the particle batches (AGE_Particles)
+    that the particles attribute names, which may live in another upload; batches
+    that are not found are only reported, never created. Particles are not
+    samples, so the samples stay as they are."""
+    if entry.particle_batches:
+        return
+    references = []
+    for lab_id in lab_ids_from_attr(attrs.get(PARTICLES_ATTR)):
+        try:
+            references.append(find_particles_reference(lab_id, archive, logger))
+        except Exception as e:
+            logger.warning(f'Particle batch {lab_id} not looked up: {e!r}')
+    found = unique(references)
+    if found:
+        entry.particle_batches = found
+
+
 def video_samples_and_instruments(archive: EntryArchive, rel_video: str, logger):
-    """Samples and instruments of the entry of a video (upload-relative path), as
-    its normalizer makes them from its YAML; None if the video has no entry.
+    """Samples, instruments and particle batches (reference texts) of the entry of
+    a video (upload-relative path), as its normalizer makes them from its YAML;
+    None if the video has no entry.
 
     A save in the GUI stores the chip and objective picked there next to the
-    samples and instruments from before; the normalizer, and so this, replaces
-    the chip (by its coating at the datetime of the video) and the particles among
-    the samples and
-    the objective among the instruments."""
+    samples and instruments from before, and older entries list particles among
+    the samples; the normalizer, and so this, moves the particles to the particle
+    batches, makes the coated chip of the chip at the datetime of the video the
+    sample and replaces the objective among the instruments."""
     entry_file = f'{rel_video}.archive.yaml'
     if not archive.m_context.raw_path_exists(entry_file):
         return None
@@ -537,14 +555,14 @@ def video_samples_and_instruments(archive: EntryArchive, rel_video: str, logger)
         {key: data[key] for key in synced if data.get(key)},
         m_context=archive.m_context,
     )
+    video.link_particles(archive, logger)
     video.link_chip(archive, logger)
-    if video.particle_batches:
-        video.link_particles(logger)
     if video.objective is not None:
         video.link_objective(logger)
     return (
         [CompositeSystemReference.m_from_dict(s.m_to_dict()) for s in video.samples],
         [InstrumentReference.m_from_dict(i.m_to_dict()) for i in video.instruments],
+        [reference_value(b) for b in video.particle_batches or []],
     )
 
 
@@ -578,9 +596,9 @@ def tracks_entry_files(context) -> Optional[list]:
 
 
 def share_with_tracks(video, archive: EntryArchive, logger) -> None:
-    """Give the tracks entries of a video's recording the samples and instruments
-    of the video entry, so that they are edited in one place, and a reference to
-    the video entry.
+    """Give the tracks entries of a video's recording the samples (the chip),
+    particle batches and instruments of the video entry, so that they are edited
+    in one place, and a reference to the video entry.
 
     The tracks are found as their parser finds the video: in the same folder, by
     name or recording id. Tracks entries that change are written and processed
@@ -596,6 +614,7 @@ def share_with_tracks(video, archive: EntryArchive, logger) -> None:
     upload_id = archive.metadata.upload_id
     shared = {
         'samples': [sample.m_to_dict() for sample in video.samples],
+        'particle_batches': [reference_value(b) for b in video.particle_batches or []],
         'instruments': [instrument.m_to_dict() for instrument in video.instruments],
         'video': get_hash_ref(upload_id, f'{video.video_file}.archive.yaml'),
     }
@@ -632,7 +651,10 @@ def share_with_tracks(video, archive: EntryArchive, logger) -> None:
             }
         )
         create_archive(tracks, archive, entry_file, overwrite=True)
-        logger.info(f'Samples, instruments and video of {name} taken from {video_name}')
+        logger.info(
+            f'Samples, particles, instruments and video of {name} taken from '
+            f'{video_name}'
+        )
 
 
 def store_entry(
@@ -702,6 +724,8 @@ class ParticleTrackingParser(MatchingParser):
         entry = build_particle_tracking_entry(directory, rel_directory, stem, files)
         from_video = None
         parsed_wins = ()
+        # Figures of filtered tracks, which older versions plotted, do not stay.
+        parser_owned = ('figures',)
         if files['video']:
             rel_video = os.path.join(rel_directory, files['video'])
             entry.video = get_hash_ref(
@@ -710,22 +734,27 @@ class ParticleTrackingParser(MatchingParser):
             parsed_wins = ('video',)
             from_video = video_samples_and_instruments(archive, rel_video, logger)
         if from_video is None:
+            settings = entry.camera_settings or {}
             link_AGE_samples(entry, chip_ids_from_filename(mainfile), archive, logger)
-            link_particles_and_objective(entry, entry.camera_settings or {})
+            link_particles_from_attrs(entry, settings, archive, logger)
+            link_objective_from_attrs(entry, settings)
         else:
-            # Samples and instruments of a recording are edited in its video entry.
-            samples, instruments = from_video
+            # The sample, particles and instruments of a recording are edited in
+            # its video entry.
+            samples, instruments, particle_batches = from_video
             for sample in samples:
                 entry.samples.append(sample)
             for instrument in instruments:
                 entry.instruments.append(instrument)
+            if particle_batches:
+                entry.particle_batches = particle_batches
             parsed_wins += ('samples', 'instruments')
+            parser_owned += ('particle_batches',)
         file_type = (
             'filtered trajectories'
             if mainfile.endswith(FILTERED_TRACKS_SUFFIX)
             else 'trajectories'
         )
-        # Figures of filtered tracks, which older versions plotted, do not stay.
         store_entry(
             entry,
             archive,
@@ -733,7 +762,7 @@ class ParticleTrackingParser(MatchingParser):
             file_type,
             logger,
             parsed_wins,
-            parser_owned=('figures',),
+            parser_owned,
         )
 
 
@@ -756,4 +785,5 @@ class ParticleTransportVideoParser(MatchingParser):
         rel_mainfile = archive.metadata.mainfile or os.path.basename(mainfile)
         entry = build_video_entry(mainfile, rel_mainfile)
         link_AGE_samples(entry, chip_ids_from_filename(mainfile), archive, logger)
+        link_particles_from_attrs(entry, entry.camera_settings or {}, archive, logger)
         store_entry(entry, archive, mainfile, 'particle transport video', logger)

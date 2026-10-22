@@ -21,6 +21,8 @@ LAB_TIMEZONE = ZoneInfo('Europe/Berlin')
 AGE_SAMPLE_SCHEMA = 'nomad_age.schema_packages.age_schema.AGE_Sample'
 # A chip in one coated state; it references its chip (AGE_Sample).
 AGE_COATED_SAMPLE_SCHEMA = 'nomad_age.schema_packages.age_schema.AGE_CoatedSample'
+# A particle batch (Inventory); measurements link it under particle_batches.
+AGE_PARTICLES_SCHEMA = 'nomad_age.schema_packages.age_schema.AGE_Particles'
 # A chip has far fewer coated states (spacer layers) than this.
 MAX_COATED_SAMPLES = 1000
 # Base section of all magnetisation measurements (L-MOKE, V-MOKE, ...); NOMAD indexes
@@ -262,16 +264,34 @@ def normalize_sample_id(lab_id: str) -> str:
     return f'{lab_id}_1' if SPUTTER_RUN_RE.fullmatch(lab_id) else lab_id
 
 
-def find_existing_AGE_sample(lab_id: str, user_id=None):
-    """AGE_Sample entries with `lab_id` that the user with `user_id` sees (own,
-    shared or published; without user id only published ones)."""
+def find_by_lab_id(lab_id: str, schema: str, user_id=None):
+    """Entries of section definition `schema` with `lab_id` that the user with
+    `user_id` sees (own, shared or published; without user id only published
+    ones)."""
     from nomad.search import search
 
     query = {
         'results.eln.lab_ids': lab_id,
-        'section_defs.definition_qualified_name': AGE_SAMPLE_SCHEMA,
+        'section_defs.definition_qualified_name': schema,
     }
     return search(query=query, owner='visible', user_id=user_id)
+
+
+def find_existing_AGE_sample(lab_id: str, user_id=None):
+    """AGE_Sample entries with `lab_id`, see find_by_lab_id."""
+    return find_by_lab_id(lab_id, AGE_SAMPLE_SCHEMA, user_id)
+
+
+def find_existing_particles(lab_id: str, user_id=None):
+    """AGE_Particles entries with `lab_id`, see find_by_lab_id."""
+    return find_by_lab_id(lab_id, AGE_PARTICLES_SCHEMA, user_id)
+
+
+def main_author_id(archive) -> Optional[str]:
+    """User id of the main author of `archive`; None if it has none."""
+    metadata = getattr(archive, 'metadata', None)
+    main_author = metadata.main_author if metadata is not None else None
+    return main_author.user_id if main_author else None
 
 
 def find_chip_reference(lab_id: str, archive, logger) -> Optional[str]:
@@ -280,9 +300,7 @@ def find_chip_reference(lab_id: str, archive, logger) -> Optional[str]:
     chip or more than one. Parsers never create chips: they live in the AGE
     Samples upload."""
     lab_id = normalize_sample_id(lab_id)
-    main_author = archive.metadata.main_author
-    user_id = main_author.user_id if main_author else None
-    hits = find_existing_AGE_sample(lab_id, user_id=user_id).data
+    hits = find_existing_AGE_sample(lab_id, user_id=main_author_id(archive)).data
     if not hits:
         logger.warning(
             f'No AGE sample with lab_id {lab_id} found; not linked. Create the chip '
@@ -293,6 +311,39 @@ def find_chip_reference(lab_id: str, archive, logger) -> Optional[str]:
         logger.error(f'Found {len(hits)} AGE samples with lab_id {lab_id}; not linked.')
         return None
     return f'{get_reference(hits[0]["upload_id"], hits[0]["entry_id"])}#data'
+
+
+def find_particles(lab_id: str, archive) -> list:
+    """References to the data of the particle batches (AGE_Particles) with
+    `lab_id` in any upload the main author of `archive` sees."""
+    hits = find_existing_particles(lab_id.strip(), user_id=main_author_id(archive))
+    return [f'{get_reference(h["upload_id"], h["entry_id"])}#data' for h in hits.data]
+
+
+def find_particles_reference(lab_id: str, archive, logger) -> Optional[str]:
+    """Reference to the data of the particle batch (AGE_Particles) with `lab_id`,
+    see find_particles; None if there is no such batch or more than one.
+    Parsers never create particle batches: they live in the AGE Inventory."""
+    references = find_particles(lab_id, archive)
+    if not references:
+        logger.warning(
+            f'No particle batch (Particles entry) with lab_id {lab_id} found; not '
+            'linked. Create it in the AGE Inventory, then reprocess this entry.'
+        )
+        return None
+    if len(references) > 1:
+        logger.error(
+            f'Found {len(references)} particle batches with lab_id {lab_id}; not '
+            'linked.'
+        )
+        return None
+    return references[0]
+
+
+def is_chip_lab_id(lab_id: str) -> bool:
+    """Whether a lab id names a chip or coated chip: these start with their
+    sputter run, e.g. 2023_0418_1 or 2023_0418_1_PMMA5."""
+    return bool(re.match(rf'{SPUTTER_RUN_RE.pattern}(?!\d)', lab_id.strip()))
 
 
 def find_coated_samples(chip_entry_id: str, user_id=None) -> list:

@@ -10,18 +10,36 @@ For a recording `X` the parsers create these entries:
 
 | File | Entry type | Content |
 | --- | --- | --- |
-| `X.h5` with dataset `frames` (camera video) | `AGE_ParticleTransportVideo` | camera settings, first and last frame; samples (chips, particles) and instruments (objective) of the recording are edited here |
+| `X.h5` with dataset `frames` (camera video) | `AGE_ParticleTransportVideo` | camera settings, first and last frame; the sample (chip), particles and instruments (objective) of the recording are edited here |
 | `X_trajs.h5` (trackpy trajectories) | `AGE_ParticleTracking` | counts and plot of the unfiltered trajectories; `video` references the video entry, which lists the tracks under "referenced by" |
 | `X_filtered_trajs.h5` | `AGE_ParticleTracking` | only for recordings uploaded without `X_trajs.h5` |
 | `*.h5` with datasets `imgs`, `poss`, `tgs` | `AGE_FocusSweep` | images and sharpness of a microscope z sweep |
 
-Videos, tracks and focus sweeps list their samples by kind under `particles`
-(linked `AGE_Particles` entries) and `chips` (linked `AGE_Sample` entries, and
-the chips of linked `AGE_CoatedSample` entries), each by the name of the linked
-entry; `spacer_thickness` is the one of the linked coated chip. The search apps
-filter by them. They are filled from `samples` each time the entry is processed
-and are not stored in the entry files; a sample whose entry cannot be loaded is
-left out with a warning.
+In particle transport measurements the sample is the chip as it was under the
+microscope: `samples` of videos, focus sweeps and tracks link only the coated
+chip (`AGE_CoatedSample`, e.g. `2023_0418_1_PMMA5`) whose layer was on the chip
+at the measurement's `datetime`, or the bare chip (`AGE_Sample`) if no layer was
+on it then. Particles are not samples: they are linked in `particle_batches`
+(`AGE_Particles` entries; "Particles" on the overview). The workflow of an entry
+has the sample and every particle batch as inputs, so a particle batch lists the
+entries under "Referenced by".
+
+For the search apps, `particles` lists the particle batches and `chips` the
+chip of the sample (of a coated chip: its chip), each by the name of the linked
+entry; `spacer_thickness` and `spacer_thickness_uncertainty` are the ones of the
+coated chip (empty for a bare chip) and are shown read-only on the overview.
+They are filled each time the entry is processed and are not stored in the entry
+files; an entry that cannot be loaded is left out with a warning.
+
+`particle_batches` of a video is filled from the `particles` attribute of the file (lab
+ids, searched among the `AGE_Particles` entries of every upload the main author
+sees; a batch that is not found is reported, never created) if it is empty; a
+choice made on the overview stays when the file is processed again. Tracks
+entries show it read-only, taken from their video entry (from the `particles`
+attribute of the tracks file without a video entry). Entries stored when
+particles were samples are migrated on processing: samples that link a particle
+batch (or whose lab_id names one) are removed, and fill `particle_batches` if it
+is empty.
 
 Videos and focus sweeps pick their microscope objective (an `AGE_Objective`
 entry) in `objective`, a dropdown on the overview page. `instruments` stays the
@@ -34,21 +52,20 @@ file is processed again, whatever its attribute says; to remove the objective,
 clear `objective` and remove it from `instruments`.
 
 They pick their chip the same way: `chip`, a dropdown of bare chips
-(`AGE_Sample`). The coating is not picked, as the dropdown cannot filter by date:
-`coating` (read-only) is derived on every processing as the `AGE_CoatedSample` of
-that chip whose layer was on it at the `datetime` of the measurement
-(`date_coated` ≤ datetime < `date_removed`; no `date_removed`: still on), so
-layers entered later are picked up on reprocessing. A date without time counts as
-the whole lab day; on the day one layer is removed and the next coated, the newer
-one is taken with a warning. `samples` follows: the samples that link a chip or a
-coated chip are replaced by one that links the coating, or the bare chip if no
-layer was on it then, or if the measurement has no datetime (both with a
-warning); particles and other samples stay. An empty `chip` is filled from the
-samples (the linked chip, or the chip of the linked coated chip), e.g. the chip
-the parser links from the file name; if they link several chips nothing changes,
-with a warning. If the coated chips cannot be looked up, the samples stay as they
-are. A picked chip stays when the file is processed again, and the tracks
-entries take over the synced samples.
+(`AGE_Sample`). The coated chip is not picked, as the dropdown cannot filter by
+date: on every processing the sample becomes the `AGE_CoatedSample` of that chip
+whose layer was on it at the `datetime` of the measurement (`date_coated` ≤
+datetime < `date_removed`; no `date_removed`: still on), so layers entered later
+are picked up on reprocessing. A date without time counts as the whole lab day;
+on the day one layer is removed and the next coated, the newer one is taken with
+a warning. If no layer was on the chip then, or if the measurement has no
+datetime, the bare chip is the sample (both with a warning). Other samples are
+removed (with a warning unless they link a chip or coated chip). An empty `chip`
+is filled from the samples (the linked chip, or the chip of the linked coated
+chip), e.g. the chip the parser links from the file name; if they link several
+chips nothing changes, with a warning. If the coated chips cannot be looked up,
+the samples stay as they are. A picked chip stays when the file is processed
+again, and the tracks entries take over the sample.
 
 The entries are written next to the files as `<file>.archive.yaml`. The entry of
 the original file itself (`AGE_RawFile`, named after the file) records it for
