@@ -172,8 +172,9 @@ age_inventory = AppEntryPoint(
             'Inventory of the AGE lab: particle batches (Particles: particle '
             'type, batch and batch date) and microscope objectives (Objective: '
             'magnification and numerical aperture). Filter by type to see only '
-            'one of them. Recordings link particles under samples and objectives '
-            'under instruments. To see where an item was used, open it: '
+            'one of them. Recordings link particle batches under Particles '
+            '(particle_batches) and objectives under instruments; their sample is '
+            'the chip. To see where an item was used, open it: '
             "'Referenced by' in Entry References lists the recordings linking it."
         ),
         search_quantities=SearchQuantities(
@@ -343,12 +344,12 @@ def particle_transport_app(
             Column(search_quantity=q('datetime'), title='Recorded', selected=True),
             Column(search_quantity=q('lab_id'), title='Recording ID'),
             Column(
-                search_quantity=q('samples[*].lab_id'), title='Samples', selected=True
+                search_quantity=q('samples[*].lab_id'), title='Sample', selected=True
             ),
             Column(
                 search_quantity=q('particles[*].name'), title='Particles', selected=True
             ),
-            Column(search_quantity=q('chips[*].name'), title='Chips'),
+            Column(search_quantity=q('chips[*].name'), title='Chip'),
             Column(
                 search_quantity=q('spacer_thickness'),
                 title='Spacer thickness',
@@ -396,18 +397,18 @@ def particle_transport_app(
             title=menu_title,
             items=[
                 Menu(
-                    title='Samples',
+                    title='Sample and particles',
                     items=[
                         MenuItemTerms(
-                            search_quantity=q('particles.name'), title='Particles'
+                            search_quantity=q('samples.lab_id'), title='Sample'
                         ),
-                        MenuItemTerms(search_quantity=q('chips.name'), title='Chips'),
+                        MenuItemTerms(search_quantity=q('chips.name'), title='Chip'),
                         MenuItemHistogram(
                             x=Axis(search_quantity=q('spacer_thickness'), unit='nm'),
                             title='Spacer thickness',
                         ),
                         MenuItemTerms(
-                            search_quantity=q('samples.lab_id'), title='Sample ID'
+                            search_quantity=q('particles.name'), title='Particles'
                         ),
                     ],
                 ),
@@ -464,7 +465,7 @@ def particle_transport_app(
             widgets=[
                 WidgetTerms(
                     search_quantity=q('samples.lab_id'),
-                    title='Samples',
+                    title='Sample',
                     layout=widget_layout(
                         sm=(0, 0, 12, 5),
                         md=(0, 0, 6, 5),
@@ -522,14 +523,17 @@ particle_transport_videos = AppEntryPoint(
         label='Particle Transport Videos',
         path='particle_transport_videos',
         description='Find particle transport videos by recording ID, sample, '
-        'objective and camera settings',
+        'particles, objective and camera settings',
         readme=(
             'Camera videos of particle transport experiments, as saved by '
             'harvesters_pg; each entry shows the camera settings and the first '
-            'frame. Chips (or coated chips) and particle batches are the samples, '
-            'objectives the instruments; filter by particles, chips or the spacer '
-            'thickness of a coated chip. The recording ID is the random id that '
-            'the acquisition software gives each recording. The trajectories '
+            'frame. The sample is the chip as it was under the microscope: its '
+            'coated chip at the time of the video (e.g. 2023_0418_1_PMMA5), or the '
+            'bare chip if no layer was on it then. Particle batches are linked '
+            'apart (Particles), objectives as instruments; filter by sample, chip, '
+            'particles or the spacer thickness of a coated chip. The recording ID '
+            'is the random id that the acquisition software gives each recording. '
+            'The trajectories '
             'tracked from a video (with their particle and localization counts) '
             "are listed under 'Referenced by' in the video's Entry References."
         ),

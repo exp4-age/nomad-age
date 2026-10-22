@@ -145,6 +145,7 @@ class FakeIndex:
         'section_defs.definition_qualified_name': lambda doc: [
             sd['definition_qualified_name'] for sd in doc.get('section_defs', [])
         ],
+        'results.eln.lab_ids': lambda doc: doc.get('lab_ids', []),
     }
 
     def __init__(self):

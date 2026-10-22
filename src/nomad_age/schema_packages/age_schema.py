@@ -301,7 +301,8 @@ def local_time(time: datetime) -> datetime:
 
 
 class AGE_Particles(CompositeSystem, EntryData, AGE_InventoryItem):
-    """Particles of one batch; measurements link it under samples."""
+    """Particles of one batch; measurements link it under particle_batches (it is
+    not a sample: the sample is the chip)."""
 
     m_def = Section(
         label='Particles',
