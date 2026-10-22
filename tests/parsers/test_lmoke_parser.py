@@ -115,3 +115,22 @@ def test_fields_are_stored_in_ka_per_m(upload, searches):
     figure = data.magnetisation_figure()
     assert figure['layout']['xaxis']['title']['text'] == 'H [kA/m]'
     assert figure['data'][0]['x'][0] == pytest.approx(raw[0])
+
+
+def test_sample_without_suffix_links_its_first_chip(upload, searches):
+    """Students write the bare sputter run (2023_0325); it means chip 2023_0325_1."""
+    path = upload / MAINFILE.name
+    text = path.read_text()
+    assert '2023_0325_1' in text
+    path.write_text(text.replace('2023_0325_1', '2023_0325'))
+
+    data = parse(upload).data
+
+    assert data.sample == '2023_0325_1'
+    assert [sample.m_to_dict() for sample in data.samples] == [
+        {
+            'name': '2023_0325_1',
+            'lab_id': '2023_0325_1',
+            'reference': f'{get_reference(SAMPLES_UPLOAD, "chip_2023_0325_1")}#data',
+        }
+    ]

@@ -140,7 +140,8 @@ class LMOKEParser(MatchingParser):
             lmokeandvmokeschema.Y = mainfile_parser.get('Y')
 
         lmokeandvmokeschema.user = assign_as_single_string(mainfile_parser.get('User'))
-        lmokeandvmokeschema.sample = mainfile_parser.get('Sample')
+        sample = mainfile_parser.get('Sample')
+        lmokeandvmokeschema.sample = normalize_sample_id(sample) if sample else None
         lmokeandvmokeschema.sample_state = assign_as_single_string(
             mainfile_parser.get('Sample State')
         )
@@ -240,8 +241,14 @@ mainfile_parser = TextParser(
         Quantity(
             'User', r'#\sUser\s+([A-Z][a-z]+\s[A-Z][a-z]+)', repeats=False, dtype=str
         ),
-        # Extracts the sample name, E for External, Z for Z400 and P for Prevac
-        Quantity('Sample', r'([EZP]?\d{4}_\d{4}_\d)', repeats=False, dtype=str),
+        # Extracts the sample name, E for External, Z for Z400 and P for Prevac.
+        # The suffix is optional: a bare sputter run 2024_0250 means chip 2024_0250_1.
+        Quantity(
+            'Sample',
+            r'#\s*Sample\s+([EZP]?\d{4}_\d{4}(?:_\d+)*)',
+            repeats=False,
+            dtype=str,
+        ),
         # Extracts the sample state, typically "as made", "after FC" or "after IB"
         Quantity('Sample State', r'#\sState\s+([a-zA-Z\s]+)', repeats=False, dtype=str),
         # Extracts the UUID of the measurement likely consisting of the experiment and
