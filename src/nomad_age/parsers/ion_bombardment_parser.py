@@ -163,6 +163,7 @@ def read_v1(lines: list, start: Optional[datetime], logger) -> dict:
     """Columns, clock times and positions of a log of the current ISA software."""
     header = None
     rows, clock, points = [], [], []
+    skipped = []
     in_points = False
     for line in lines:
         text = line.strip()
@@ -188,15 +189,22 @@ def read_v1(lines: list, start: Optional[datetime], logger) -> dict:
             continue
         cells = line.rstrip('\r\n').split('\t')
         if len(cells) != len(header):
-            logger.warning(f'Skipped log line with {len(cells)} columns: {text[:60]!r}')
+            skipped.append(text)
             continue
         try:
-            values = [float(c) for c in cells[1:]]
-            clock.append(datetime.strptime(cells[0].strip(), '%H:%M:%S').time())
+            # PyBeamer writes 'error' when a device read fails
+            values = [np.nan if c.strip() == 'error' else float(c) for c in cells[1:]]
+            moment = datetime.strptime(cells[0].strip(), '%H:%M:%S').time()
         except ValueError:
-            logger.warning(f'Skipped unreadable log line: {text[:60]!r}')
+            skipped.append(text)
             continue
+        clock.append(moment)
         rows.append(values)
+    if skipped:
+        logger.warning(
+            f'Skipped {len(skipped)} unreadable log lines (wrong number of columns '
+            f'or values), first: {skipped[0][:60]!r}'
+        )
 
     columns = {}
     if rows:
@@ -349,12 +357,12 @@ def guess_chip(mainfile: str, logger) -> Optional[str]:
 
 def summarise(entry, columns, points):
     def median(title):
-        return float(np.median(columns[title])) if title in columns else None
+        return float(np.nanmedian(columns[title])) if title in columns else None
 
     if 'BeamCurrent' in columns:
-        entry.max_beam_current = float(np.max(columns['BeamCurrent']))
+        entry.max_beam_current = float(np.nanmax(columns['BeamCurrent']))
     if 'ChamberPressure' in columns:
-        entry.mean_chamber_pressure = float(np.mean(columns['ChamberPressure']))
+        entry.mean_chamber_pressure = float(np.nanmean(columns['ChamberPressure']))
     entry.source_setpoint = median('SourceSetpoint')
     entry.lens_setpoint = median('LensSetpoint')
     entry.magnet_setpoint = median('MagnetSetpoint')

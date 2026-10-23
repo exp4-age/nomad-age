@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import yaml
 from nomad.datamodel import EntryArchive, EntryMetadata
@@ -106,6 +107,22 @@ def test_point_lines():
         False,
     )
     assert parse_point('Positions Dictionary:') is None
+
+
+def test_device_errors_and_broken_lines(caplog, kwargs_logger):
+    lines = (DATA / LOG_2026).read_text(encoding='latin1').splitlines()
+    first = next(i for i, line in enumerate(lines) if line.startswith('11:49'))
+    cells = lines[first].split('\t')
+    cells[5] = 'error'  # BeamCurrent read failed
+    lines[first] = '\t'.join(cells)
+    lines.insert(first + 1, '15:18:33\t4.660\t0')
+    lines.insert(first + 1, '15:18:34\t4.660\t0')
+    with caplog.at_level(logging.WARNING):
+        r = read_v1(lines, None, kwargs_logger)
+    assert len(r['seconds']) == 60
+    assert np.isnan(r['columns']['BeamCurrent'][0])
+    warnings = [m.getMessage() for m in caplog.records if 'Skipped' in m.getMessage()]
+    assert len(warnings) == 1 and 'Skipped 2 ' in warnings[0]
 
 
 def test_dose_list_last_entry_is_applied():
