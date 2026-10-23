@@ -97,25 +97,43 @@ def start_date(mainfile: str) -> Optional[datetime]:
 def parse_point(line: str) -> Optional[dict]:
     """One row of the positions table, e.g.
     Point6: [[0.300,0.250],3.5e15,True,True,179.8547,['3.5e15']]
-    as [[x, y], dose wanted, assigned, bombarded, time or velocity, dose bombarded]."""
+    as [[x, y], dose wanted, assigned, bombarded, time or velocity, dose bombarded].
+
+    A position with one x/y pair is a point; any other coordinates (an area, e.g.
+    the whole sample) are kept as written, and the time column is then the
+    velocity of the scan. A point bombarded with a wanted dose of 0 is a
+    reference spot (a short shot, e.g. ~2e13 in 1 s)."""
     match = POINT_RE.match(line.strip())
     if not match:
         return None
     name, number, body = match.groups()
-    (x, y), wanted, assigned, bombarded, time, done = ast.literal_eval(body)
+    coordinates, wanted, assigned, bombarded, time, done = ast.literal_eval(body)
     record = done if isinstance(done, (list, tuple)) else [done]
-    return {
+    is_point = (
+        isinstance(coordinates, (list, tuple))
+        and len(coordinates) == 2
+        and all(isinstance(c, (int, float)) for c in coordinates)
+    )
+    point = {
         'name': name,
         'number': int(number),
-        'x': float(x),
-        'y': float(y),
+        'mode': 'point' if is_point else 'area',
+        'coordinates': str(coordinates),
         'dose_wanted': float(wanted),
         'assigned': bool(assigned),
         'bombarded': bool(bombarded),
-        'bombardment_time': float(time),
         'dose_bombarded': float(sum(float(d) for d in record)),
         'dose_record': ', '.join(str(d) for d in record),
     }
+    if is_point:
+        point['x'], point['y'] = float(coordinates[0]), float(coordinates[1])
+        point['bombardment_time'] = float(time)
+    else:
+        point['velocity'] = float(time)
+    point['reference_spot'] = bool(
+        is_point and bombarded and float(wanted) == 0 and point['dose_bombarded'] > 0
+    )
+    return point
 
 
 def read_v1(lines: list, start: Optional[datetime], logger) -> dict:
@@ -221,26 +239,44 @@ def plot_log(seconds, columns) -> go.Figure:
 
 
 def plot_points(points) -> go.Figure:
-    doses = np.array([p['dose_bombarded'] for p in points])
-    shown = np.log10(np.where(doses > 0, doses, np.nan))
-    fig = go.Figure(
-        go.Scatter(
-            x=[p['x'] for p in points],
-            y=[p['y'] for p in points],
+    """Map of the point positions coloured by dose; reference spots and points
+    not bombarded as grey crosses."""
+    points = [p for p in points if p['mode'] == 'point']
+
+    def dosed(p):
+        return p['bombarded'] and p['dose_bombarded'] > 0 and not p['reference_spot']
+
+    hover = (
+        '%{customdata[0]}<br>x %{x} cm, y %{y} cm<br>'
+        'dose %{customdata[1]:.3g} /cm² (wanted %{customdata[2]:.3g})'
+        '<extra></extra>'
+    )
+
+    def trace(group, name, marker):
+        return go.Scatter(
+            x=[p['x'] for p in group],
+            y=[p['y'] for p in group],
             mode='markers+text',
-            text=[str(p['number']) for p in points],
+            name=name,
+            text=[str(p['number']) for p in group],
             textposition='top center',
             customdata=[
-                [p['name'], p['dose_bombarded'], p['dose_wanted']] for p in points
+                [p['name'], p['dose_bombarded'], p['dose_wanted']] for p in group
             ],
-            hovertemplate=(
-                '%{customdata[0]}<br>x %{x} cm, y %{y} cm<br>'
-                'dose %{customdata[1]:.3g} /cm² (wanted %{customdata[2]:.3g})'
-                '<extra></extra>'
-            ),
-            marker=dict(
+            hovertemplate=hover,
+            marker=marker,
+        )
+
+    main = [p for p in points if dosed(p)]
+    other = [p for p in points if not dosed(p)]
+    fig = go.Figure()
+    fig.add_trace(
+        trace(
+            main,
+            'bombarded',
+            dict(
                 size=14,
-                color=shown,
+                color=[float(np.log10(p['dose_bombarded'])) for p in main],
                 colorscale='Viridis',
                 showscale=True,
                 colorbar=dict(title='log10 dose (/cm²)'),
@@ -248,9 +284,18 @@ def plot_points(points) -> go.Figure:
             ),
         )
     )
+    if other:
+        fig.add_trace(
+            trace(
+                other,
+                'reference spot / not bombarded',
+                dict(size=12, color='grey', symbol='x'),
+            )
+        )
     fig.update_layout(
         xaxis=dict(title='x (cm)'),
         yaxis=dict(title='y (cm)', scaleanchor='x'),
+        legend=dict(orientation='h', yanchor='bottom', y=1.01, xanchor='right', x=1),
     )
     return fig
 
@@ -294,7 +339,14 @@ def summarise(entry, columns, points):
     entry.number_of_points = len(points)
     done = [p for p in points if p['bombarded']]
     entry.number_bombarded = len(done)
-    doses = [p['dose_bombarded'] for p in done if p['dose_bombarded'] > 0]
+    entry.number_reference_spots = sum(p['reference_spot'] for p in done)
+    modes = sorted({p['mode'] for p in done})
+    entry.bombardment_mode = ' + '.join(modes) if modes else None
+    doses = [
+        p['dose_bombarded']
+        for p in done
+        if p['dose_bombarded'] > 0 and not p['reference_spot']
+    ]
     if doses:
         entry.min_dose = min(doses)
         entry.max_dose = max(doses)
@@ -356,7 +408,7 @@ class IonBombardmentParser(MatchingParser):
         summarise(entry, columns, points)
 
         figures = []
-        if points:
+        if any(p['mode'] == 'point' for p in points):
             figures.append(
                 PlotlyFigure(
                     label='Bombarded positions',

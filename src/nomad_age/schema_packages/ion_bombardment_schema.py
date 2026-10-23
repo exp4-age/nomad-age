@@ -9,7 +9,14 @@ from nomad.datamodel.metainfo.annotations import (
 from nomad.datamodel.metainfo.basesections import Process
 from nomad.datamodel.metainfo.plot import PlotSection
 from nomad.datamodel.metainfo.workflow import Link
-from nomad.metainfo import Datetime, Quantity, SchemaPackage, Section, SubSection
+from nomad.metainfo import (
+    Datetime,
+    MEnum,
+    Quantity,
+    SchemaPackage,
+    Section,
+    SubSection,
+)
 
 from nomad_age.schema_packages.age_schema import AGE_FromRawFile
 
@@ -31,6 +38,26 @@ class AGE_IonBombardmentPoint(ArchiveSection):
     name = Quantity(type=str, description='Name in the log, e.g. Point3.')
 
     number = Quantity(type=int, description='Number of the position in the log.')
+
+    mode = Quantity(
+        type=MEnum(['point', 'area']),
+        description=(
+            "'point' for one x/y position, 'area' for anything else, e.g. the "
+            'whole sample; then the whole dose is on that area.'
+        ),
+    )
+
+    coordinates = Quantity(
+        type=str, description='Coordinates exactly as listed in the log (cm).'
+    )
+
+    reference_spot = Quantity(
+        type=bool,
+        description=(
+            'A point with a wanted dose of 0 that still got a short shot; '
+            'not counted in min/max dose.'
+        ),
+    )
 
     x = Quantity(type=float, unit='cm', description='x position of the stage.')
 
@@ -62,10 +89,14 @@ class AGE_IonBombardmentPoint(ArchiveSection):
     bombarded = Quantity(type=bool, description='Position bombarded.')
 
     bombardment_time = Quantity(
+        type=float, unit='s', description='Actual bombardment time of a point.'
+    )
+
+    velocity = Quantity(
         type=float,
         description=(
-            'Actual bombardment time in s for a point, or the velocity for an area '
-            '(the log uses one column for both).'
+            'Scan velocity of an area bombardment as written in the log (the log '
+            'uses one column for time and velocity; unit not stated).'
         ),
     )
 
@@ -110,10 +141,19 @@ class AGE_IonBombardment(PlotSection, AGE_FromRawFile, Process, EntryData):
 
     number_bombarded = Quantity(type=int, description='Number of bombarded positions.')
 
+    number_reference_spots = Quantity(
+        type=int, description='Bombarded points with a wanted dose of 0.'
+    )
+
+    bombardment_mode = Quantity(
+        type=str,
+        description="'point', 'area' or 'area + point' (whole sample = area).",
+    )
+
     min_dose = Quantity(
         type=float,
         unit='1 / cm**2',
-        description='Smallest non-zero bombarded dose.',
+        description='Smallest non-zero bombarded dose, without reference spots.',
     )
 
     max_dose = Quantity(

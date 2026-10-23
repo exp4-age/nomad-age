@@ -84,6 +84,8 @@ def test_point_lines():
     assert p == {
         'name': 'Point14',
         'number': 14,
+        'mode': 'point',
+        'coordinates': '[1.142, 0.48]',
         'x': 1.142,
         'y': 0.48,
         'dose_wanted': 0.0,
@@ -92,7 +94,10 @@ def test_point_lines():
         'bombardment_time': 1.0043,
         'dose_bombarded': 1.86e13,
         'dose_record': '1.86e13',
+        'reference_spot': True,
     }
+    p = parse_point("Point6: [[0.300,0.250],3.5e15,True,True,179.8547,['3.5e15']]")
+    assert (p['reference_spot'], p['dose_bombarded']) == (False, 3.5e15)
     # not bombarded: the log writes a plain 0.0 instead of a list
     p = parse_point('Point19: [[-1.299,-0.600],0.0,True,False,0.0000,0.0]')
     assert (p['bombarded'], p['dose_bombarded'], p['dose_record']) == (
@@ -100,7 +105,20 @@ def test_point_lines():
         0.0,
         '0.0',
     )
+    assert p['reference_spot'] is False
     assert parse_point('Positions Dictionary:') is None
+
+
+def test_area_rows_keep_their_coordinates():
+    # format of area rows not seen yet: anything but one x/y pair is an area
+    p = parse_point("Point1: [[[0.0,0.0],[1.0,1.0]],1.0e15,True,True,0.5,['1.0e15']]")
+    assert (p['mode'], p['coordinates'], p['velocity']) == (
+        'area',
+        '[[0.0, 0.0], [1.0, 1.0]]',
+        0.5,
+    )
+    assert 'x' not in p and 'bombardment_time' not in p
+    assert p['reference_spot'] is False
 
 
 def test_entry_of_2026_log(tmp_path, searches):
@@ -119,7 +137,9 @@ def test_entry_of_2026_log(tmp_path, searches):
     assert data['datetime'].startswith('2026-08-19T09:49:28')  # CEST -> UTC
     assert data['number_of_points'] == 20
     assert data['number_bombarded'] == 20
-    assert data['min_dose'] == pytest.approx(1.86e13)
+    assert data['number_reference_spots'] == 2  # Point14, Point20
+    assert data['bombardment_mode'] == 'point'
+    assert data['min_dose'] == pytest.approx(2e14)  # reference spots excluded
     assert data['max_dose'] == pytest.approx(1e17)
     points = data['points']
     assert points[12]['name'] == 'Point13'
@@ -157,6 +177,7 @@ def test_not_bombarded_point_and_2025_log(tmp_path, searches):
     assert data['number_of_points'] == 19
     assert data['number_bombarded'] == 18
     assert data['points'][-1]['bombarded'] is False
+    assert data['number_reference_spots'] == 0
     assert data['min_dose'] == pytest.approx(1e14)
     assert data['max_dose'] == pytest.approx(1e16)
     assert data['samples'][0]['lab_id'] == '2024_0248_1'
