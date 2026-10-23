@@ -1,0 +1,219 @@
+import hashlib
+import logging
+import shutil
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+import yaml
+from nomad.datamodel import EntryArchive, EntryMetadata
+from nomad.datamodel.context import ClientContext
+from nomad.utils import get_logger
+
+from nomad_age.parsers.ion_bombardment_parser import (
+    IonBombardmentParser,
+    detect_format_version,
+    parse_point,
+)
+from nomad_age.schema_packages.age_schema import AGE_RawFile
+from nomad_age.schema_packages.ion_bombardment_schema import ION_BOMBARDMENT_METHOD
+from nomad_age.utils import utils
+from nomad_age.utils.utils import get_entry_id, get_hash_ref, get_reference
+
+DATA = Path(__file__).parent.parent / 'data/isa'
+LOG_2026 = '20260819_114439_logger.txt'
+LOG_2025 = '20250514_121010_logger.txt'
+SAMPLES_UPLOAD = 'age_samples_upload'
+
+
+def chip_ref(lab_id):
+    return f'{get_reference(SAMPLES_UPLOAD, "chip_" + lab_id)}#data'
+
+
+@pytest.fixture
+def searches(monkeypatch):
+    calls, missing = [], set()
+
+    def search(lab_id, user_id=None):
+        calls.append(lab_id)
+        if lab_id in missing:
+            return SimpleNamespace(data=[])
+        return SimpleNamespace(
+            data=[{'upload_id': SAMPLES_UPLOAD, 'entry_id': 'chip_' + lab_id}]
+        )
+
+    monkeypatch.setattr(utils, 'find_existing_AGE_sample', search)
+    return SimpleNamespace(calls=calls, missing=missing)
+
+
+def make_upload(tmp_path, log, lmoke=('2024_0250',)):
+    for name in lmoke:
+        (tmp_path / f'{name}_LMOKE_2026-08-19_10-00-00.txt').write_text(
+            '# Meas. type\n'
+        )
+    shutil.copy(DATA / log, tmp_path / log)
+    return tmp_path
+
+
+def parse(upload, log, logger=None) -> EntryArchive:
+    archive = EntryArchive(
+        m_context=ClientContext(local_dir=str(upload)),
+        metadata=EntryMetadata(mainfile=log, upload_id='test_upload'),
+    )
+    logger = logger or get_logger(__name__)
+    IonBombardmentParser().parse(str(upload / log), archive, logger)
+    archive.data.normalize(archive, logger)
+    return archive
+
+
+def entry_data(upload, log) -> dict:
+    with open(upload / f'{log}.archive.yaml') as f:
+        return yaml.safe_load(f)['data']
+
+
+def test_version_detection():
+    v1 = (DATA / LOG_2026).read_text(encoding='latin1').splitlines()
+    assert detect_format_version(v1) == '1'
+    assert detect_format_version(['Version: 2', '...']) == '2'
+    assert detect_format_version(['# ISA logger version = 2.1']) == '2.1'
+    assert detect_format_version(['something else', 'entirely']) is None
+
+
+def test_point_lines():
+    p = parse_point("Point14: [[1.142,0.480],0.0,True,True,1.0043,['1.86e13']]")
+    assert p == {
+        'name': 'Point14',
+        'number': 14,
+        'x': 1.142,
+        'y': 0.48,
+        'dose_wanted': 0.0,
+        'assigned': True,
+        'bombarded': True,
+        'bombardment_time': 1.0043,
+        'dose_bombarded': 1.86e13,
+        'dose_record': '1.86e13',
+    }
+    # not bombarded: the log writes a plain 0.0 instead of a list
+    p = parse_point('Point19: [[-1.299,-0.600],0.0,True,False,0.0000,0.0]')
+    assert (p['bombarded'], p['dose_bombarded'], p['dose_record']) == (
+        False,
+        0.0,
+        '0.0',
+    )
+    assert parse_point('Positions Dictionary:') is None
+
+
+def test_entry_of_2026_log(tmp_path, searches):
+    upload = make_upload(tmp_path, LOG_2026)
+    raw = parse(upload, LOG_2026).data
+
+    assert isinstance(raw, AGE_RawFile)
+    assert raw.file_type == 'ion bombardment log'
+    content = (upload / LOG_2026).read_bytes()
+    assert raw.sha256 == hashlib.sha256(content).hexdigest()
+
+    data = entry_data(upload, LOG_2026)
+    assert data['raw_file'] == get_hash_ref('test_upload', LOG_2026)
+    assert data['log_format_version'] == '1'
+    assert data['name'] == 'IB_2026-08-19 11:49:28'
+    assert data['datetime'].startswith('2026-08-19T09:49:28')  # CEST -> UTC
+    assert data['number_of_points'] == 20
+    assert data['number_bombarded'] == 20
+    assert data['min_dose'] == pytest.approx(1.86e13)
+    assert data['max_dose'] == pytest.approx(1e17)
+    points = data['points']
+    assert points[12]['name'] == 'Point13'
+    assert points[12]['dose_wanted'] == pytest.approx(1e17)
+    assert (points[0]['x'], points[0]['y']) == (0.32, 0.0)
+    assert len(data['time']) == len(data['beam_current']) == 60
+    assert data['time'][0] == 0 and data['time'][1] == 5
+    labels = [f['label'] for f in data['figures']]
+    assert labels == ['Bombarded positions', 'Beam current and pressure']
+    assert data['samples'] == [
+        {
+            'm_def': data['samples'][0]['m_def'],
+            'name': '2024_0250_1',
+            'lab_id': '2024_0250_1',
+            'reference': chip_ref('2024_0250_1'),
+        }
+    ]
+
+
+def test_normalize_sets_method_for_chip_state(tmp_path, searches):
+    from nomad_age.schema_packages.ion_bombardment_schema import AGE_IonBombardment
+
+    upload = make_upload(tmp_path, LOG_2026)
+    parse(upload, LOG_2026)
+    entry = AGE_IonBombardment.m_from_dict(entry_data(upload, LOG_2026))
+    archive = EntryArchive(data=entry, metadata=EntryMetadata())
+    entry.normalize(archive, get_logger(__name__))
+    assert entry.method == ION_BOMBARDMENT_METHOD == 'Helium Ion Bombardment'
+
+
+def test_not_bombarded_point_and_2025_log(tmp_path, searches):
+    upload = make_upload(tmp_path, LOG_2025, lmoke=('2024_0248_1',))
+    parse(upload, LOG_2025)
+    data = entry_data(upload, LOG_2025)
+    assert data['number_of_points'] == 19
+    assert data['number_bombarded'] == 18
+    assert data['points'][-1]['bombarded'] is False
+    assert data['min_dose'] == pytest.approx(1e14)
+    assert data['max_dose'] == pytest.approx(1e16)
+    assert data['samples'][0]['lab_id'] == '2024_0248_1'
+
+
+def test_no_or_several_chips_link_nothing(tmp_path, searches, caplog, kwargs_logger):
+    upload = make_upload(tmp_path, LOG_2026, lmoke=('2024_0250', '2024_0248_1'))
+    with caplog.at_level(logging.WARNING):
+        parse(upload, LOG_2026, logger=kwargs_logger)
+    assert 'samples' not in entry_data(upload, LOG_2026)
+    assert any('2 chips' in r.getMessage() for r in caplog.records)
+    assert searches.calls == []
+
+
+def test_missing_chip_is_reported_not_created(
+    tmp_path, searches, caplog, kwargs_logger
+):
+    upload = make_upload(tmp_path, LOG_2026)
+    searches.missing.add('2024_0250_1')
+    with caplog.at_level(logging.WARNING):
+        parse(upload, LOG_2026, logger=kwargs_logger)
+    (sample,) = entry_data(upload, LOG_2026)['samples']
+    assert 'reference' not in sample
+    assert {p.name for p in upload.glob('*.archive.yaml')} == {
+        f'{LOG_2026}.archive.yaml'
+    }
+
+
+def test_chip_chosen_in_gui_wins(tmp_path, searches, stored_archives):
+    upload = make_upload(tmp_path, LOG_2026)
+    parse(upload, LOG_2026)
+    stored = entry_data(upload, LOG_2026)
+    stored['samples'] = [
+        {'name': '2024_0251_1', 'lab_id': '2024_0251_1', 'reference': chip_ref('x')}
+    ]
+    stored['ion_energy'] = 30.0
+    with open(upload / f'{LOG_2026}.archive.yaml', 'w') as f:
+        yaml.dump({'data': stored}, f)
+    stored_archives({get_entry_id('test_upload', f'{LOG_2026}.archive.yaml'): stored})
+
+    parse(upload, LOG_2026)
+
+    data = entry_data(upload, LOG_2026)
+    assert data['samples'][0]['lab_id'] == '2024_0251_1'
+    assert data['ion_energy'] == 30.0
+
+
+def test_unknown_version_keeps_raw_file_and_date(
+    tmp_path, searches, caplog, kwargs_logger
+):
+    log = '20270101_090000_logger.txt'
+    (tmp_path / log).write_text('Version: 2\nBeamCurrent; whatever\n')
+    with caplog.at_level(logging.ERROR):
+        archive = parse(tmp_path, log, logger=kwargs_logger)
+    assert isinstance(archive.data, AGE_RawFile)
+    data = entry_data(tmp_path, log)
+    assert data['log_format_version'] == '2'
+    assert data['name'] == 'IB_2027-01-01 09:00:00'
+    assert 'points' not in data
+    assert any('Unknown ISA log format' in r.getMessage() for r in caplog.records)

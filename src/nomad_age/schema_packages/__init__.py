@@ -66,3 +66,19 @@ particle_tracking_schema_entry_point = ParticleTrackingSchemaEntryPoint(
     name='ParticleTrackingSchema',
     description='Entry Point for particle tracking and focus sweep schemata.',
 )
+
+
+class IonBombardmentSchemaEntryPoint(SchemaPackageEntryPoint):
+    parameter: int = Field(0, description='Custom configuration parameter')
+
+    def load(self):
+        install_entry_hash()
+        from nomad_age.schema_packages.ion_bombardment_schema import m_package
+
+        return m_package  # Package with the helium ion bombardment schema
+
+
+ion_bombardment_schema_entry_point = IonBombardmentSchemaEntryPoint(
+    name='IonBombardmentSchema',
+    description='Entry Point for the helium ion bombardment (ISA) schema.',
+)
