@@ -117,3 +117,22 @@ particle_transport_video_parser_entry_point = ParticleTransportVideoParserEntryP
     mainfile_mime_re=r'application/x-hdf.*',
     mainfile_contents_dict={'__has_all_keys': ['frames']},
 )
+
+
+class IonBombardmentParserEntryPoint(ParserEntryPoint):
+    parameter: int = Field(0, description='Custom configuration parameter')
+
+    def load(self):
+        install_entry_hash()
+        from nomad_age.parsers.ion_bombardment_parser import IonBombardmentParser
+
+        return IonBombardmentParser(**self.dict())
+
+
+ion_bombardment_parser_entry_point = IonBombardmentParserEntryPoint(
+    name='IonBombardmentParser',
+    description='Parser for the logs of the helium ion bombardment (ISA) software.',
+    mainfile_name_re=r'.*logger\.txt$',
+    # v1 logs have this column; a rewritten software must keep it or this changes
+    mainfile_contents_re=r'BeamCurrent',
+)
