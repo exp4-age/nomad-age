@@ -94,46 +94,69 @@ def start_date(mainfile: str) -> Optional[datetime]:
     return datetime.strptime(match.group(1), '%Y%m%d_%H%M%S')
 
 
+# PyBeamer (Main_V5_5_noDB, Bombardmentclasses_V3) refuses point times below
+# MyConfig.Beam_minBombardmentTime = 1 s, while scan velocities are ~1e-2 cm/s;
+# so column 5 below 1 is a velocity.
+MIN_POINT_TIME = 1.0
+
+
 def parse_point(line: str) -> Optional[dict]:
     """One row of the positions table, e.g.
     Point6: [[0.300,0.250],3.5e15,True,True,179.8547,['3.5e15']]
-    as [[x, y], dose wanted, assigned, bombarded, time or velocity, dose bombarded].
+    as [[x, y], dose wanted, assigned, bombarded, time or velocity, doses].
 
-    A position with one x/y pair is a point; any other coordinates (an area, e.g.
-    the whole sample) are kept as written, and the time column is then the
-    velocity of the scan. A point bombarded with a wanted dose of 0 is a
-    reference spot (a short shot, e.g. ~2e13 in 1 s)."""
+    How PyBeamer writes it (ISA_lib/Main_V5_5_noDB.py, Operator.logger):
+    - the last column is a list with one dose per `_check_iondose` call; a paused
+      multi-point run checks again before it bombards, so the LAST entry is the
+      dose applied (clipped to the min/max dose of the beam). Without a list it
+      writes the wanted dose.
+    - the time column is the actual bombardment time (s) of a point, or the
+      scan velocity (cm/s) in area, line and gradient mode.
+    A point bombarded with a wanted dose of 0 is a reference spot."""
     match = POINT_RE.match(line.strip())
     if not match:
         return None
     name, number, body = match.groups()
-    coordinates, wanted, assigned, bombarded, time, done = ast.literal_eval(body)
-    record = done if isinstance(done, (list, tuple)) else [done]
-    is_point = (
-        isinstance(coordinates, (list, tuple))
-        and len(coordinates) == 2
-        and all(isinstance(c, (int, float)) for c in coordinates)
-    )
+    (x, y), wanted, assigned, bombarded, time, done = ast.literal_eval(body)
+    record = list(done) if isinstance(done, (list, tuple)) else [done]
+    dose = float(record[-1]) if record else float(wanted)
     point = {
         'name': name,
         'number': int(number),
-        'mode': 'point' if is_point else 'area',
-        'coordinates': str(coordinates),
+        'x': float(x),
+        'y': float(y),
         'dose_wanted': float(wanted),
         'assigned': bool(assigned),
         'bombarded': bool(bombarded),
-        'dose_bombarded': float(sum(float(d) for d in record)),
+        'dose_bombarded': dose if bombarded else 0.0,
         'dose_record': ', '.join(str(d) for d in record),
     }
-    if is_point:
-        point['x'], point['y'] = float(coordinates[0]), float(coordinates[1])
+    if float(time) >= MIN_POINT_TIME or float(time) == 0:
         point['bombardment_time'] = float(time)
     else:
         point['velocity'] = float(time)
     point['reference_spot'] = bool(
-        is_point and bombarded and float(wanted) == 0 and point['dose_bombarded'] > 0
+        bombarded and float(wanted) == 0 and point['dose_bombarded'] > 0
     )
     return point
+
+
+def bombardment_mode(points: list) -> Optional[str]:
+    """PyBeamer's mode, which the log does not name.
+
+    'multi point': times of at least 1 s. 'area': two positions (start and end
+    corner of the rectangle, e.g. the whole sample) with the same velocity,
+    which PyBeamer sets for both. 'line or gradient': other velocities; the
+    log cannot tell line, steep and flat sum gradient apart."""
+    done = [p for p in points if p['bombarded']]
+    if not done:
+        return None
+    if all('velocity' not in p for p in done):
+        return 'multi point'
+    speeds = {p.get('velocity') for p in done}
+    if len(points) == 2 and len(speeds) == 1:
+        return 'area'
+    return 'line or gradient'
 
 
 def read_v1(lines: list, start: Optional[datetime], logger) -> dict:
@@ -241,7 +264,6 @@ def plot_log(seconds, columns) -> go.Figure:
 def plot_points(points) -> go.Figure:
     """Map of the point positions coloured by dose; reference spots and points
     not bombarded as grey crosses."""
-    points = [p for p in points if p['mode'] == 'point']
 
     def dosed(p):
         return p['bombarded'] and p['dose_bombarded'] > 0 and not p['reference_spot']
@@ -340,8 +362,7 @@ def summarise(entry, columns, points):
     done = [p for p in points if p['bombarded']]
     entry.number_bombarded = len(done)
     entry.number_reference_spots = sum(p['reference_spot'] for p in done)
-    modes = sorted({p['mode'] for p in done})
-    entry.bombardment_mode = ' + '.join(modes) if modes else None
+    entry.bombardment_mode = bombardment_mode(points)
     doses = [
         p['dose_bombarded']
         for p in done
@@ -408,7 +429,7 @@ class IonBombardmentParser(MatchingParser):
         summarise(entry, columns, points)
 
         figures = []
-        if any(p['mode'] == 'point' for p in points):
+        if points:
             figures.append(
                 PlotlyFigure(
                     label='Bombarded positions',

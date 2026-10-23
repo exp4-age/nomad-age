@@ -11,7 +11,6 @@ from nomad.datamodel.metainfo.plot import PlotSection
 from nomad.datamodel.metainfo.workflow import Link
 from nomad.metainfo import (
     Datetime,
-    MEnum,
     Quantity,
     SchemaPackage,
     Section,
@@ -39,22 +38,10 @@ class AGE_IonBombardmentPoint(ArchiveSection):
 
     number = Quantity(type=int, description='Number of the position in the log.')
 
-    mode = Quantity(
-        type=MEnum(['point', 'area']),
-        description=(
-            "'point' for one x/y position, 'area' for anything else, e.g. the "
-            'whole sample; then the whole dose is on that area.'
-        ),
-    )
-
-    coordinates = Quantity(
-        type=str, description='Coordinates exactly as listed in the log (cm).'
-    )
-
     reference_spot = Quantity(
         type=bool,
         description=(
-            'A point with a wanted dose of 0 that still got a short shot; '
+            'A position with a wanted dose of 0 that still got a short shot; '
             'not counted in min/max dose.'
         ),
     )
@@ -73,9 +60,9 @@ class AGE_IonBombardmentPoint(ArchiveSection):
         type=float,
         unit='1 / cm**2',
         description=(
-            'Dose the software reports as bombarded (ions/cm²); the sum if it lists '
-            'several. Can differ from the wanted dose, e.g. a 0 position that got a '
-            'short shot.'
+            'Dose applied (ions/cm²): the last of the listed doses (PyBeamer adds '
+            'one per dose check, e.g. again after a pause; clipped to what the beam '
+            'allows), 0 if not bombarded. In area mode it is on Point1.'
         ),
     )
 
@@ -94,9 +81,10 @@ class AGE_IonBombardmentPoint(ArchiveSection):
 
     velocity = Quantity(
         type=float,
+        unit='cm / s',
         description=(
-            'Scan velocity of an area bombardment as written in the log (the log '
-            'uses one column for time and velocity; unit not stated).'
+            'Scan velocity in area, line and gradient mode (same log column as '
+            'the bombardment time of a point).'
         ),
     )
 
@@ -147,7 +135,10 @@ class AGE_IonBombardment(PlotSection, AGE_FromRawFile, Process, EntryData):
 
     bombardment_mode = Quantity(
         type=str,
-        description="'point', 'area' or 'area + point' (whole sample = area).",
+        description=(
+            "'multi point', 'area' (rectangle between Point1 and Point2, e.g. the "
+            "whole sample) or 'line or gradient'; derived, the log does not name it."
+        ),
     )
 
     min_dose = Quantity(

@@ -12,8 +12,10 @@ from nomad.utils import get_logger
 
 from nomad_age.parsers.ion_bombardment_parser import (
     IonBombardmentParser,
+    bombardment_mode,
     detect_format_version,
     parse_point,
+    read_v1,
 )
 from nomad_age.schema_packages.age_schema import AGE_RawFile
 from nomad_age.schema_packages.ion_bombardment_schema import ION_BOMBARDMENT_METHOD
@@ -84,8 +86,6 @@ def test_point_lines():
     assert p == {
         'name': 'Point14',
         'number': 14,
-        'mode': 'point',
-        'coordinates': '[1.142, 0.48]',
         'x': 1.142,
         'y': 0.48,
         'dose_wanted': 0.0,
@@ -98,27 +98,39 @@ def test_point_lines():
     }
     p = parse_point("Point6: [[0.300,0.250],3.5e15,True,True,179.8547,['3.5e15']]")
     assert (p['reference_spot'], p['dose_bombarded']) == (False, 3.5e15)
-    # not bombarded: the log writes a plain 0.0 instead of a list
-    p = parse_point('Point19: [[-1.299,-0.600],0.0,True,False,0.0000,0.0]')
-    assert (p['bombarded'], p['dose_bombarded'], p['dose_record']) == (
+    # not bombarded: the log writes the wanted dose instead of a list
+    p = parse_point('Point19: [[-1.299,-0.600],5.0e15,True,False,0.0000,5.0e15]')
+    assert (p['bombarded'], p['dose_bombarded'], p['reference_spot']) == (
         False,
         0.0,
-        '0.0',
+        False,
     )
-    assert p['reference_spot'] is False
     assert parse_point('Positions Dictionary:') is None
 
 
-def test_area_rows_keep_their_coordinates():
-    # format of area rows not seen yet: anything but one x/y pair is an area
-    p = parse_point("Point1: [[[0.0,0.0],[1.0,1.0]],1.0e15,True,True,0.5,['1.0e15']]")
-    assert (p['mode'], p['coordinates'], p['velocity']) == (
-        'area',
-        '[[0.0, 0.0], [1.0, 1.0]]',
-        0.5,
-    )
-    assert 'x' not in p and 'bombardment_time' not in p
-    assert p['reference_spot'] is False
+def test_dose_list_last_entry_is_applied():
+    # one entry per dose check; after a pause the first one was never applied
+    p = parse_point("Point3: [[0.0,0.0],1.0e15,True,True,5.2,['5.0e14', '1.0e15']]")
+    assert p['dose_bombarded'] == 1e15
+    assert p['dose_record'] == '5.0e14, 1.0e15'
+
+
+@pytest.mark.parametrize(
+    'log, mode, velocity',
+    [
+        ('20231122_112137_logger.txt', 'area', 0.0105),
+        ('20230308_144525_logger.txt', 'line or gradient', 0.0499),
+        (LOG_2026, 'multi point', None),
+    ],
+)
+def test_bombardment_mode(log, mode, velocity):
+    lines = (DATA / log).read_text(encoding='latin1').splitlines()
+    points = read_v1(lines, None, get_logger(__name__))['points']
+    assert bombardment_mode(points) == mode
+    assert points[0].get('velocity') == velocity
+    if mode == 'area':
+        assert [(p['x'], p['y']) for p in points] == [(0.0, 0.0), (1.7, 1.7)]
+        assert points[0]['dose_bombarded'] == 8e14
 
 
 def test_entry_of_2026_log(tmp_path, searches):
@@ -138,7 +150,7 @@ def test_entry_of_2026_log(tmp_path, searches):
     assert data['number_of_points'] == 20
     assert data['number_bombarded'] == 20
     assert data['number_reference_spots'] == 2  # Point14, Point20
-    assert data['bombardment_mode'] == 'point'
+    assert data['bombardment_mode'] == 'multi point'
     assert data['min_dose'] == pytest.approx(2e14)  # reference spots excluded
     assert data['max_dose'] == pytest.approx(1e17)
     points = data['points']
