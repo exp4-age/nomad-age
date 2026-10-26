@@ -357,6 +357,7 @@ class AGE_Objective(Instrument, EntryData, AGE_InventoryItem):
                     'lab_id',
                     'magnification',
                     'numerical_aperture',
+                    'pixel_size',
                     'description',
                 ],
             )
@@ -373,6 +374,18 @@ class AGE_Objective(Instrument, EntryData, AGE_InventoryItem):
         type=float,
         description='Numerical aperture (NA).',
         a_eln=ELNAnnotation(component=ELNComponentEnum.NumberEditQuantity),
+    )
+
+    pixel_size = Quantity(
+        type=float,
+        unit='µm',
+        description=(
+            'Edge length of one camera pixel in the sample plane with this objective '
+            'on the camera of its setup. Measurements that use the objective take '
+            'it over as their pixel size.'
+        ),
+        a_eln=ELNAnnotation(component=ELNComponentEnum.NumberEditQuantity),
+        a_display={'unit': 'µm'},
     )
 
 

@@ -862,6 +862,7 @@ INVENTORY = {
         'm_def': 'nomad_age.schema_packages.age_schema.AGE_Objective',
         'name': 'Objective 20x',
         'lab_id': 'OBJ-20x',
+        'pixel_size': 0.48,
     },
     (INVENTORY_UPLOAD_ID, 'obj50'): {
         'm_def': 'nomad_age.schema_packages.age_schema.AGE_Objective',
@@ -1067,6 +1068,39 @@ def test_reprocessing_keeps_the_picked_objective(
     ).data
     assert parse_reference(data.objective) == (INVENTORY_UPLOAD_ID, 'obj50')
     assert linked(data.instruments) == [('Objective 50x', 'OBJ-50x', 'obj50')]
+
+
+@pytest.mark.parametrize('entry_type', [*WITH_OBJECTIVE, 'AGE_ParticleTracking'])
+def test_pixel_size_is_taken_from_the_objective(
+    tmp_path, process_entry, stored_archives_context, kwargs_logger, entry_type
+):
+    write_measurement(
+        tmp_path, entry_type, pixel_size=0.25, instruments=[instrument('obj20')]
+    )
+    context = stored_archives_context(tmp_path, INVENTORY)
+
+    data = process_entry(
+        tmp_path, 'rec.archive.yaml', logger=kwargs_logger, context=context
+    ).data
+
+    assert data.pixel_size.to('µm').magnitude == pytest.approx(0.48)
+
+
+@pytest.mark.parametrize('entry_type', WITH_OBJECTIVE)
+def test_pixel_size_stays_without_one_on_the_objective(
+    tmp_path, process_entry, stored_archives_context, kwargs_logger, entry_type
+):
+    # obj50 has no pixel size: the one set by hand stays
+    write_measurement(
+        tmp_path, entry_type, pixel_size=0.19, instruments=[instrument('obj50')]
+    )
+    context = stored_archives_context(tmp_path, INVENTORY)
+
+    data = process_entry(
+        tmp_path, 'rec.archive.yaml', logger=kwargs_logger, context=context
+    ).data
+
+    assert data.pixel_size.to('µm').magnitude == pytest.approx(0.19)
 
 
 def test_tracks_take_the_picked_objective_from_the_video_entry(
