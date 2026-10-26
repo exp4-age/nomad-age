@@ -70,7 +70,11 @@ class AGE_ParticleMicroscopy(ArchiveSection):
     pixel_size = Quantity(
         type=float,
         unit='µm',
-        description='Edge length of one camera pixel in the sample plane.',
+        description=(
+            'Edge length of one camera pixel in the sample plane. Taken over from '
+            'the objective entry if it has a pixel size (edit it there); otherwise '
+            'set by hand.'
+        ),
         a_eln=ELNAnnotation(component=ELNComponentEnum.NumberEditQuantity),
         a_display={'unit': 'µm'},
     )
@@ -568,6 +572,29 @@ class AGE_Measurement(Measurement):
         if isinstance(self, AGE_ObjectiveLink):
             self.link_objective(logger)
         self.name_instruments(logger)
+        if isinstance(self, AGE_ParticleMicroscopy):
+            self.pixel_size_from_objective(logger)
+
+    def pixel_size_from_objective(self, logger) -> None:
+        """Take over the pixel size of the linked objective entry, if it has one.
+
+        Without an objective, or one without a pixel size, the pixel size stays as
+        it is (e.g. set by hand).
+        """
+        for instrument in self.instruments:
+            if not links_objective(instrument.reference):
+                continue
+            try:
+                target = resolved(instrument.reference)
+            except Exception as e:
+                logger.warning(
+                    f'Pixel size not taken over: objective not loaded: {e!r}'
+                )
+                return
+            size = getattr(target, 'pixel_size', None)
+            if size is not None:
+                self.pixel_size = size
+            return
 
     def name_instruments(self, logger) -> None:
         """Name each instrument after the entry it links, so the search apps can
