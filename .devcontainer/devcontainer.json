@@ -1,28 +1,35 @@
-// For format details, see https://aka.ms/devcontainer.json. For config options, see the
-// README at: https://github.com/devcontainers/templates/tree/main/src/python
+// Development container for nomad-age.
+// Matches production: Python 3.12 and nomad-lab 2.0.0 with the same extras as
+// the exp4-age/nomad-oasis image ("parsing, infrastructure"). When the Oasis
+// moves to a new NOMAD version, bump NOMAD_VERSION below together with it.
+// Format: https://aka.ms/devcontainer.json
 {
-  "name": "Python 3",
-  // Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-  "image": "mcr.microsoft.com/devcontainers/python:1-3.9-bookworm",
-  "features": {
-    "ghcr.io/devcontainers-contrib/features/ruff:2": {}
+  "name": "nomad-age (Python 3.12, NOMAD 2.0.0)",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+  "containerEnv": {
+    "NOMAD_VERSION": "2.0.0",
+    "UV_LINK_MODE": "copy"
   },
-  // Features to add to the dev container. More info: https://containers.dev/features.
-  // "features": {},
-  // Use 'forwardPorts' to make a list of ports inside the container available locally.
-  // "forwardPorts": [],
-  // Use 'postCreateCommand' to run commands after the container is created.
-  "postCreateCommand": "pipx install cruft",
-  // Configure tool-specific properties.
+  // .venv first on PATH (and activated in ~/.bashrc for login shells, whose
+  // /etc/profile puts the system Python first): python, pytest and ruff are
+  // the versions from pyproject (the old ruff feature shipped ruff 0.4).
+  "remoteEnv": {
+    "PATH": "${containerWorkspaceFolder}/.venv/bin:${containerEnv:PATH}"
+  },
+  // Creates .venv in the repo and installs the plugin (editable) with NOMAD.
+  // Run the tests with:  pytest tests   and lint with:  ruff check .
+  "postCreateCommand": "pipx install uv && pipx install cruft && uv venv --allow-existing --python 3.12 .venv && uv pip install --python .venv -e '.[dev]' \"nomad-lab[parsing,infrastructure]==${NOMAD_VERSION}\" && echo 'source ${containerWorkspaceFolder}/.venv/bin/activate' >> ~/.bashrc",
   "customizations": {
-    // Configure properties specific to VS Code.
     "vscode": {
-      // Add the IDs of extensions you want installed when the container is created.
+      "settings": {
+        "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": ["tests"]
+      },
       "extensions": [
+        "ms-python.python",
         "charliermarsh.ruff"
       ]
     }
   }
-  // Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
-  // "remoteUser": "root"
 }
