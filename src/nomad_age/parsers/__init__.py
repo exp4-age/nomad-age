@@ -136,3 +136,21 @@ ion_bombardment_parser_entry_point = IonBombardmentParserEntryPoint(
     # v1 logs have this column; a rewritten software must keep it or this changes
     mainfile_contents_re=r'BeamCurrent',
 )
+
+
+class VSMParserEntryPoint(ParserEntryPoint):
+    parameter: int = Field(0, description='Custom configuration parameter')
+
+    def load(self):
+        install_entry_hash()
+        from nomad_age.parsers.vsm_parser import VSMParser
+
+        return VSMParser(**self.dict())
+
+
+vsm_parser_entry_point = VSMParserEntryPoint(
+    name='VSMParser',
+    description='Parser for the hysteresis loops of the home-built VSM (*_VSM_*.asc).',
+    mainfile_name_re=r'.*_VSM_.*\.(asc|ASC)$',
+    mainfile_contents_re=r'VSM Messdaten',
+)
