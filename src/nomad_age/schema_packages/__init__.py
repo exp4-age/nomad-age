@@ -82,3 +82,19 @@ ion_bombardment_schema_entry_point = IonBombardmentSchemaEntryPoint(
     name='IonBombardmentSchema',
     description='Entry Point for the helium ion bombardment (ISA) schema.',
 )
+
+
+class VSMSchemaEntryPoint(SchemaPackageEntryPoint):
+    parameter: int = Field(0, description='Custom configuration parameter')
+
+    def load(self):
+        install_entry_hash()
+        from nomad_age.schema_packages.vsm_schema import m_package
+
+        return m_package  # Package with the VSM schema
+
+
+vsm_schema_entry_point = VSMSchemaEntryPoint(
+    name='VSMSchema',
+    description='Entry Point for the VSM (vibrating sample magnetometer) schema.',
+)

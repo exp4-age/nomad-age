@@ -127,6 +127,8 @@ focus_sweep_parser_entry_point = "nomad_age.parsers:focus_sweep_parser_entry_poi
 particle_transport_video_parser_entry_point = "nomad_age.parsers:particle_transport_video_parser_entry_point"
 ion_bombardment_schema = "nomad_age.schema_packages:ion_bombardment_schema_entry_point"
 ion_bombardment_parser_entry_point = "nomad_age.parsers:ion_bombardment_parser_entry_point"
+vsm_schema = "nomad_age.schema_packages:vsm_schema_entry_point"
+vsm_parser_entry_point = "nomad_age.parsers:vsm_parser_entry_point"
 
 [tool.cruft]
 # Avoid updating workflow files, this leads to permissions issues
