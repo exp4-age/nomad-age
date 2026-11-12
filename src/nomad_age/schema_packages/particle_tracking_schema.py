@@ -50,6 +50,10 @@ from nomad_age.utils.utils import (
 m_package = SchemaPackage(name='particle_tracking_schema')
 
 
+# Illumination modes of the microscope, as the illumination attribute names them.
+ILLUMINATION_MODES = ('brightfield', 'darkfield')
+
+
 class AGE_ParticleMicroscopy(ArchiveSection):
     """Microscope settings that the camera attributes do not contain.
 
@@ -59,10 +63,13 @@ class AGE_ParticleMicroscopy(ArchiveSection):
     """
 
     illumination = Quantity(
-        type=MEnum(['brightfield', 'darkfield']),
+        type=MEnum(list(ILLUMINATION_MODES)),
         description=(
-            'Illumination mode of the microscope. Guessed from the background '
-            'brightness of the first video frame or sweep image; edit if wrong.'
+            'Illumination mode of the microscope. Taken from the illumination '
+            'attribute of the file (darkfield or brightfield) if it has one, else '
+            'guessed from the background brightness of the first video frame or '
+            'sweep image; edit if wrong. A choice made here stays when the file is '
+            'processed again.'
         ),
         a_eln=ELNAnnotation(component=ELNComponentEnum.EnumEditQuantity),
     )
@@ -289,8 +296,8 @@ class AGE_ChipLink(ArchiveSection):
             'The chip (AGE Sample) measured on. The sample is its coated chip of the '
             'time of the measurement (datetime), or the bare chip if no layer was on '
             'it then: picking another chip here replaces the sample. Filled from the '
-            'samples if empty; a choice made here stays when the file is processed '
-            'again.'
+            'chip attribute of the file or else the samples if empty; a choice made '
+            'here stays when the file is processed again.'
         ),
         a_eln=ELNAnnotation(
             component=ELNComponentEnum.ReferenceEditQuantity, label='Chip'
@@ -766,6 +773,89 @@ class AGE_ParticleTransport(
     )
 
 
+class AGE_FocusSweep(
+    AGE_ParticleMicroscopy,
+    AGE_FromRawFile,
+    PlotSection,
+    AGE_Measurement,
+    AGE_ChipLink,
+    AGE_ParticlesLink,
+    AGE_ObjectiveLink,
+    EntryData,
+):
+    m_def = Section(
+        label='Focus Sweep',
+        description=(
+            'Microscope z sweep: one image and one Tenengrad sharpness value per '
+            'stage position. Chip, particles, objective and illumination come from '
+            'the attributes chip, particles, objective and illumination of the file '
+            '(the chip else from the file name) or are picked here, as for videos. '
+            'Videos link the sweeps taken for them (focus_sweeps); they are listed '
+            'under Referenced by.'
+        ),
+        a_eln=ELNAnnotation(
+            properties=SectionProperties(
+                visible=Filter(exclude=['lab_id']),
+                editable=dict(exclude=['data_file', *FROM_SAMPLES]),
+                order=OVERVIEW_ORDER,
+            )
+        ),
+    )
+
+    data_file = Quantity(
+        type=str,
+        description='HDF5 file of the focus sweep.',
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.FileEditQuantity,
+            label='Focus Sweep File',
+        ),
+    )
+
+    n_images = Quantity(
+        type=int,
+        description='Images in the sweep.',
+    )
+
+    z_position = Quantity(
+        type=float,
+        shape=['*'],
+        unit='µm',
+        description='Stage z position of each image (dataset poss).',
+        a_display={'unit': 'µm'},
+    )
+
+    tenengrad = Quantity(
+        type=float,
+        shape=['*'],
+        description='Tenengrad sharpness of each image (dataset tgs).',
+    )
+
+    max_focus_position = Quantity(
+        type=float,
+        unit='µm',
+        description='z position of best focus (attribute maxfocus).',
+        a_display={'unit': 'µm'},
+    )
+
+    max_slope_position = Quantity(
+        type=float,
+        unit='µm',
+        description='z position of the steepest sharpness slope (attribute maxslope).',
+        a_display={'unit': 'µm'},
+    )
+
+    last_position = Quantity(
+        type=float,
+        unit='µm',
+        description='z position stored as attribute last_position.',
+        a_display={'unit': 'µm'},
+    )
+
+    def normalize(self, archive, logger):
+        self.method = 'Focus Sweep'
+        super().normalize(archive, logger)
+
+
 class AGE_ParticleTransportVideo(
     AGE_ParticleTransport, AGE_ChipLink, AGE_ParticlesLink, AGE_ObjectiveLink, EntryData
 ):
@@ -774,17 +864,20 @@ class AGE_ParticleTransportVideo(
         description=(
             'Camera video of a particle transport experiment, as saved by '
             'harvesters_pg (HDF5 with a frames dataset). Its sample is the chip as '
-            'it was under the microscope: the chip comes from the file name or is '
-            'picked here (Chip), its coated chip at the time of the video, with the '
-            'spacer thickness, is derived. Particles and objective come from its '
-            'attributes particles and objective or are picked here (Particles, '
-            'Objective). The tracks entries of the recording take over its sample, '
-            'particles and instruments.'
+            'it was under the microscope: the chip comes from the chip attribute of '
+            'the file (a coated chip id such as 2023_0418_1_PMMA5 means its chip), '
+            'else from the file name, or is picked here (Chip); its coated chip at '
+            'the time of the video, with the spacer thickness, is derived. '
+            'Particles, objective and illumination come from the attributes '
+            'particles, objective and illumination, the focus sweeps taken before '
+            'it from the attribute focus_sweeps (file names in the folder of the '
+            'video), or are picked here. The tracks entries of the recording take '
+            'over its sample, particles and instruments.'
         ),
         a_eln=ELNAnnotation(
             properties=SectionProperties(
                 editable=dict(exclude=['lab_id', 'video_file', *FROM_SAMPLES]),
-                order=OVERVIEW_ORDER,
+                order=[*OVERVIEW_ORDER, 'focus_sweeps'],
             )
         ),
     )
@@ -804,6 +897,22 @@ class AGE_ParticleTransportVideo(
         unit='s',
         description='Recorded time: video frames divided by the frame rate.',
         a_display={'unit': 's'},
+    )
+
+    focus_sweeps = Quantity(
+        type=AGE_FocusSweep,
+        shape=['*'],
+        description=(
+            'Entries of the focus sweeps that belong to this video, e.g. the sweep '
+            'that focused the microscope before it was recorded; several videos may '
+            'link the same sweep, which lists them under Referenced by. Filled from '
+            'the focus_sweeps attribute of the file (names of sweep files in the '
+            'folder of the video) if empty; a choice made here stays when the file '
+            'is processed again.'
+        ),
+        a_eln=ELNAnnotation(
+            component=ELNComponentEnum.ReferenceEditQuantity, label='Focus sweeps'
+        ),
     )
 
     def normalize(self, archive, logger):
@@ -970,85 +1079,6 @@ class AGE_TrajectoryFiltering(Analysis, EntryData):
                     name=name, reference=get_hash_ref(upload_id, entry_file)
                 )
             )
-
-
-class AGE_FocusSweep(
-    AGE_ParticleMicroscopy,
-    AGE_FromRawFile,
-    PlotSection,
-    AGE_Measurement,
-    AGE_ChipLink,
-    AGE_ParticlesLink,
-    AGE_ObjectiveLink,
-    EntryData,
-):
-    m_def = Section(
-        label='Focus Sweep',
-        description=(
-            'Microscope z sweep: one image and one Tenengrad sharpness value per '
-            'stage position.'
-        ),
-        a_eln=ELNAnnotation(
-            properties=SectionProperties(
-                visible=Filter(exclude=['lab_id']),
-                editable=dict(exclude=['data_file', *FROM_SAMPLES]),
-                order=OVERVIEW_ORDER,
-            )
-        ),
-    )
-
-    data_file = Quantity(
-        type=str,
-        description='HDF5 file of the focus sweep.',
-        a_eln=ELNAnnotation(
-            component=ELNComponentEnum.FileEditQuantity,
-            label='Focus Sweep File',
-        ),
-    )
-
-    n_images = Quantity(
-        type=int,
-        description='Images in the sweep.',
-    )
-
-    z_position = Quantity(
-        type=float,
-        shape=['*'],
-        unit='µm',
-        description='Stage z position of each image (dataset poss).',
-        a_display={'unit': 'µm'},
-    )
-
-    tenengrad = Quantity(
-        type=float,
-        shape=['*'],
-        description='Tenengrad sharpness of each image (dataset tgs).',
-    )
-
-    max_focus_position = Quantity(
-        type=float,
-        unit='µm',
-        description='z position of best focus (attribute maxfocus).',
-        a_display={'unit': 'µm'},
-    )
-
-    max_slope_position = Quantity(
-        type=float,
-        unit='µm',
-        description='z position of the steepest sharpness slope (attribute maxslope).',
-        a_display={'unit': 'µm'},
-    )
-
-    last_position = Quantity(
-        type=float,
-        unit='µm',
-        description='z position stored as attribute last_position.',
-        a_display={'unit': 'µm'},
-    )
-
-    def normalize(self, archive, logger):
-        self.method = 'Focus Sweep'
-        super().normalize(archive, logger)
 
 
 m_package.__init_metainfo__()

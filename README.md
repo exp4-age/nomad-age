@@ -31,10 +31,11 @@ coated chip (empty for a bare chip) and are shown read-only on the overview.
 They are filled each time the entry is processed and are not stored in the entry
 files; an entry that cannot be loaded is left out with a warning.
 
-`particle_batches` of a video is filled from the `particles` attribute of the file (lab
-ids, searched among the `AGE_Particles` entries of every upload the main author
-sees; a batch that is not found is reported, never created) if it is empty; a
-choice made on the overview stays when the file is processed again. Tracks
+`particle_batches` of a video or focus sweep is filled from the `particles`
+attribute of the file (lab ids, searched among the `AGE_Particles` entries of
+every upload the main author sees; a batch that is not found is reported, never
+created) if it is empty; a choice made on the overview stays when the file is
+processed again. Tracks
 entries show it read-only, taken from their video entry (from the `particles`
 attribute of the tracks file without a video entry). Entries stored when
 particles were samples are migrated on processing: samples that link a particle
@@ -66,6 +67,18 @@ chip), e.g. the chip the parser links from the file name; if they link several
 chips nothing changes, with a warning. If the coated chips cannot be looked up,
 the samples stay as they are. A picked chip stays when the file is processed
 again, and the tracks entries take over the sample.
+
+Videos and focus sweeps take the lab metadata that the age-uploader writes as
+HDF5 root attributes (plain strings) before uploading; each fills only an empty
+field, so a choice made on the overview stays when the file is processed again:
+
+| Attribute | On | Fills |
+| --- | --- | --- |
+| `chip` | video, sweep | `chip` and the sample: lab_id of the bare chip; a coated chip id (`2023_0418_1_PMMA5`) means its chip, the coated chip still follows from `datetime`. Wins over the chip in the file name; a chip that is not found is reported and kept as sample by lab_id (the file name is then not used) |
+| `particles` | video, sweep | `particle_batches` (comma-separated lab ids, see above) |
+| `objective` | video, sweep | `objective`/`instruments` (lab_id of the objective, see above) |
+| `illumination` | video, sweep | `illumination`: `darkfield` or `brightfield` (any case) instead of the guess from the image brightness; other values are reported and the guess is kept |
+| `focus_sweeps` | video | `focus_sweeps` ("Focus sweeps"): comma-separated file names of sweeps in the folder of the video; each links the entry file of the sweep (`<sweep>.h5.archive.yaml`), whichever file is processed first. A sweep lists the videos that link it under "Referenced by". Names the upload does not have are reported and skipped |
 
 The entries are written next to the files as `<file>.archive.yaml`. The entry of
 the original file itself (`AGE_RawFile`, named after the file) records it for

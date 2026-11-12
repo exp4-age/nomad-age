@@ -14,6 +14,7 @@ import yaml
 from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.datamodel.context import ClientContext
 from nomad.datamodel.metainfo.plot import PlotlyFigure
+from nomad.utils import generate_entry_id
 from PIL import Image
 
 from nomad_age.parsers import (
@@ -151,7 +152,7 @@ def write_filtered_tracks(path, df, attrs=None):
             f.attrs[key] = value
 
 
-def write_focus_sweep(path):
+def write_focus_sweep(path, attrs=None):
     with h5py.File(path, 'w') as f:
         f.create_dataset('imgs', data=np.zeros((5, 6, 4), dtype=np.uint8))
         f.create_dataset('poss', data=np.array([137.0, 137.3, 137.6, 137.9, 138.2]))
@@ -160,6 +161,8 @@ def write_focus_sweep(path):
         f.attrs['maxslope'] = 137.3
         f.attrs['last_position'] = 138.2
         f.attrs['timestamp'] = '20250227110207'
+        for key, value in (attrs or {}).items():
+            f.attrs[key] = value
 
 
 def matches(parser, path):
@@ -924,6 +927,8 @@ def test_objective_is_shown_and_edited_on_the_overview():
         assert eln.component == 'ReferenceEditQuantity'
         assert eln.label == 'Objective'
         assert 'objective' in user_editable_keys(section.m_def)
+        # videos show their focus sweeps after the objective
+        extra = ['focus_sweeps'] if section is AGE_ParticleTransportVideo else []
         assert section.m_def.m_annotations['eln'].properties.order == [
             'name',
             'datetime',
@@ -932,6 +937,7 @@ def test_objective_is_shown_and_edited_on_the_overview():
             'spacer_thickness_uncertainty',
             'particle_batches',
             'objective',
+            *extra,
         ]
     # tracks take the instruments of their video and pick no objective
     assert 'objective' not in AGE_ParticleTracking.m_def.all_quantities
@@ -1900,3 +1906,254 @@ def test_tracks_take_the_picked_particles_from_the_video_entry(
 
     assert batch_entry_ids(tracks) == ['nh2']
     assert 'samples' not in tracks
+
+
+# Attributes that the age-uploader writes into videos and focus sweeps; the
+# images of write_video and write_focus_sweep are black (darkfield guess).
+LAB_ATTRS = {
+    'chip': '2023_0418_1_PMMA5',
+    'particles': 'M270, NH2',
+    'objective': 'OBJ-20x',
+    'illumination': 'brightfield',
+}
+# lab time of PMMA5_TIME, while PMMA5 is on chip1
+PMMA5_TIMESTAMP = '20260602120000'
+
+
+def index_lab(fake_index) -> None:
+    """Make the chips of AGE_SAMPLES and the particle batches of INVENTORY
+    findable by lab_id."""
+    for archives, kind in ((AGE_SAMPLES, 'AGE_Sample'), (INVENTORY, 'AGE_Particles')):
+        index_inventory(
+            fake_index,
+            {k: v for k, v in archives.items() if v['m_def'].endswith(f'.{kind}')},
+        )
+
+
+def sweep_reference(rel_path: str) -> str:
+    """Reference to the entry file that the sweep parser writes next to a sweep."""
+    entry_id = generate_entry_id('test_upload', f'{rel_path}.archive.yaml')
+    return f'../uploads/test_upload/archive/{entry_id}#data'
+
+
+@pytest.mark.parametrize(
+    'chip', ['2023_0418_1', '2023_0418', '2023_0418_1_PMMA5', ' 2023_0418_1_PMMA4 ']
+)
+def test_chip_attribute_fills_the_chip_and_beats_the_file_name(
+    tmp_path, fake_index, caplog, chip
+):
+    index_lab(fake_index)
+    # the file name names chip2, the attribute chip1 or one of its coated chips
+    write_video(tmp_path / '2023_0325_rec.h5', {**recording(ID_A), 'chip': chip})
+
+    data = parse(ParticleTransportVideoParser(), tmp_path, '2023_0325_rec.h5')
+
+    assert data['chip'] == samples_reference('chip1')
+    assert links(data['samples']) == [('2023_0418_1', '2023_0418_1', 'chip1')]
+    assert not warning_messages(caplog)
+
+
+def test_chip_attribute_of_a_coated_chip_links_the_coated_chip_at_the_datetime(
+    tmp_path,
+    process_entry,
+    stored_archives_context,
+    coated_chips,
+    kwargs_logger,
+    caplog,
+):
+    index_lab(coated_chips)
+    # PMMA3 was removed before the video: the layer on the chip then is the sample
+    attrs = {
+        **recording(ID_A),
+        'timestamp': PMMA5_TIMESTAMP,
+        'chip': '2023_0418_1_PMMA3',
+    }
+    write_video(tmp_path / 'rec.h5', attrs)
+    parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+    context = stored_archives_context(tmp_path, AGE_SAMPLES)
+
+    data = process_entry(
+        tmp_path, 'rec.h5.archive.yaml', logger=kwargs_logger, context=context
+    ).data
+
+    assert entry_id_of(data.chip) == 'chip1'
+    assert linked_ids(data.samples) == ['pmma5']
+    assert magnitude(data.spacer_thickness) == 3369.25
+    assert not warning_messages(caplog)
+
+
+def test_unknown_chip_attribute_is_reported_and_the_file_name_not_used(
+    tmp_path, fake_index, caplog
+):
+    index_lab(fake_index)
+    write_video(
+        tmp_path / '2023_0325_rec.h5', {**recording(ID_A), 'chip': '2099_0101_1'}
+    )
+
+    data = parse(ParticleTransportVideoParser(), tmp_path, '2023_0325_rec.h5')
+
+    # kept by lab id: NOMAD links it once the chip exists, and on reprocessing the
+    # attribute fills the chip
+    assert 'chip' not in data
+    assert data['samples'] == [{'name': '2099_0101_1', 'lab_id': '2099_0101_1'}]
+    (warning,) = warning_messages(caplog)
+    assert warning.startswith('No AGE sample with lab_id 2099_0101_1 found')
+    assert {p.name for p in tmp_path.glob('*.archive.yaml')} == {
+        '2023_0325_rec.h5.archive.yaml'
+    }
+
+
+@pytest.mark.parametrize('illumination', ['brightfield', 'Brightfield', ' BRIGHTFIELD'])
+def test_illumination_attribute_beats_the_brightness_guess(
+    tmp_path, caplog, illumination
+):
+    attrs = {**recording(ID_A), 'illumination': illumination}
+    write_video(tmp_path / 'rec.h5', attrs)  # black frames: guessed darkfield
+
+    data = parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+
+    assert data['illumination'] == 'brightfield'
+    assert not warning_messages(caplog)
+
+
+def test_invalid_illumination_attribute_falls_back_to_the_guess(tmp_path, caplog):
+    write_video(tmp_path / 'rec.h5', {**recording(ID_A), 'illumination': 'phase'})
+
+    data = parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+
+    assert data['illumination'] == 'darkfield'
+    (warning,) = warning_messages(caplog)
+    assert warning.startswith("Illumination attribute 'phase' is none of")
+
+
+def test_focus_sweep_takes_chip_particles_objective_and_illumination_from_attrs(
+    tmp_path, fake_index, caplog
+):
+    index_lab(fake_index)
+    write_focus_sweep(tmp_path / 'sweep.h5', LAB_ATTRS)
+
+    data = parse(FocusSweepParser(), tmp_path, 'sweep.h5')
+
+    assert data['chip'] == samples_reference('chip1')
+    assert links(data['samples']) == [('2023_0418_1', '2023_0418_1', 'chip1')]
+    assert data['particle_batches'] == [
+        inventory_reference('m270'),
+        inventory_reference('nh2'),
+    ]
+    assert lab_ids(data['instruments']) == ['OBJ-20x']
+    assert data['illumination'] == 'brightfield'
+    assert not warning_messages(caplog)
+
+
+def test_focus_sweeps_are_shown_and_edited_on_the_video_overview():
+    quantity = AGE_ParticleTransportVideo.m_def.all_quantities['focus_sweeps']
+    eln = quantity.m_annotations['eln']
+    assert (eln.component, eln.label) == ('ReferenceEditQuantity', 'Focus sweeps')
+    assert quantity.type.target_section_def is AGE_FocusSweep.m_def
+    assert quantity.shape == ['*']
+    assert 'focus_sweeps' in user_editable_keys(AGE_ParticleTransportVideo.m_def)
+    # on the video only
+    assert 'focus_sweeps' not in AGE_FocusSweep.m_def.all_quantities
+    assert 'focus_sweeps' not in AGE_ParticleTracking.m_def.all_quantities
+
+
+def test_videos_link_their_focus_sweep_whichever_is_processed_first(
+    tmp_path, process_entry, entry_references, kwargs_logger, caplog
+):
+    folder = tmp_path / 'day1'
+    folder.mkdir()
+    write_focus_sweep(folder / 'sweep.h5')
+    for name, recording_id in (('rec1.h5', ID_A), ('rec2.h5', ID_B)):
+        attrs = {**recording(recording_id), 'focus_sweeps': 'sweep.h5'}
+        write_video(folder / name, attrs)
+
+    # before and after the sweep has its entry
+    first = parse(ParticleTransportVideoParser(), tmp_path, 'day1/rec1.h5')
+    parse(FocusSweepParser(), tmp_path, 'day1/sweep.h5')
+    second = parse(ParticleTransportVideoParser(), tmp_path, 'day1/rec2.h5')
+
+    reference = sweep_reference('day1/sweep.h5')
+    assert first['focus_sweeps'] == second['focus_sweeps'] == [reference]
+    # NOMAD indexes the references, so the sweep lists both videos as referencing it
+    sweep_id = parse_reference(reference)[1]
+    for name in ('rec1.h5', 'rec2.h5'):
+        video = process_entry(
+            tmp_path, f'day1/{name}.archive.yaml', logger=kwargs_logger
+        )
+        assert ('data.focus_sweeps', sweep_id) in entry_references(video)
+    assert not warning_messages(caplog)
+
+
+def test_focus_sweeps_not_in_the_folder_of_the_video_are_reported(tmp_path, caplog):
+    write_focus_sweep(tmp_path / 'sweep_a.h5')
+    (tmp_path / 'day1').mkdir()
+    write_focus_sweep(tmp_path / 'day1' / 'sweep_b.h5')
+    attrs = {**recording(ID_A), 'focus_sweeps': 'sweep_a.h5, sweep_b.h5,sweep_a.h5'}
+    write_video(tmp_path / 'rec.h5', attrs)
+    write_video(tmp_path / 'other.h5', {**recording(ID_B), 'focus_sweeps': 'nope.h5'})
+
+    data = parse(ParticleTransportVideoParser(), tmp_path, 'rec.h5')
+    other = parse(ParticleTransportVideoParser(), tmp_path, 'other.h5')
+
+    assert data['focus_sweeps'] == [sweep_reference('sweep_a.h5')]
+    assert 'focus_sweeps' not in other
+    assert [m.split(' of ')[0] for m in warning_messages(caplog)] == [
+        'Focus sweep sweep_b.h5',
+        'Focus sweep nope.h5',
+    ]
+
+
+def write_lab_recording(tmp_path) -> None:
+    """A video with all attributes of the uploader and its focus sweep."""
+    write_focus_sweep(tmp_path / 'sweep.h5', LAB_ATTRS)
+    write_focus_sweep(tmp_path / 'other_sweep.h5')
+    attrs = {**recording(ID_A), **LAB_ATTRS, 'focus_sweeps': 'sweep.h5'}
+    write_video(tmp_path / 'rec.h5', attrs)
+
+
+LAB_PARSERS = [(ParticleTransportVideoParser, 'rec.h5'), (FocusSweepParser, 'sweep.h5')]
+
+
+@pytest.mark.parametrize('parser, mainfile', LAB_PARSERS)
+def test_reparsing_with_attributes_writes_the_same_entry_file(
+    tmp_path, fake_index, stored_archives, parser, mainfile
+):
+    index_lab(fake_index)
+    write_lab_recording(tmp_path)
+    written = parse(parser(), tmp_path, mainfile)
+    entry_file = tmp_path / f'{mainfile}.archive.yaml'
+    text = entry_file.read_text()
+    assert written['chip'] == samples_reference('chip1')
+    eid = get_entry_id('test_upload', f'{mainfile}.archive.yaml')
+    # plus the values that normalizing fills in
+    stored_archives({eid: {**written, 'chips': [{'name': '2023_0418_1'}]}})
+
+    parse(parser(), tmp_path, mainfile)
+
+    assert entry_file.read_text() == text
+
+
+@pytest.mark.parametrize('parser, mainfile', LAB_PARSERS)
+def test_choices_made_in_the_gui_win_over_the_attributes_on_reprocessing(
+    tmp_path, fake_index, stored_archives, parser, mainfile
+):
+    index_lab(fake_index)
+    write_lab_recording(tmp_path)
+    written = parse(parser(), tmp_path, mainfile)
+    # the processed archive after everything was picked anew on the overview page
+    picked = {
+        'chip': samples_reference('chip2'),
+        'samples': [sample('chip2_pmma1')],
+        'particle_batches': [inventory_reference('cooh')],
+        'objective': inventory_reference('obj50'),
+        'instruments': [{**instrument('obj50'), 'name': 'Objective 50x'}],
+        'illumination': 'darkfield',
+    }
+    if parser is ParticleTransportVideoParser:
+        picked['focus_sweeps'] = [sweep_reference('other_sweep.h5')]
+    eid = get_entry_id('test_upload', f'{mainfile}.archive.yaml')
+    stored_archives({eid: {**written, **picked}})
+
+    reparsed = parse(parser(), tmp_path, mainfile)
+
+    assert {key: reparsed.get(key) for key in picked} == picked

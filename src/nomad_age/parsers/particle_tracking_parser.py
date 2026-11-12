@@ -22,6 +22,7 @@ from PIL import Image
 from nomad_age.schema_packages.age_schema import AGE_RawFile
 from nomad_age.schema_packages.particle_tracking_schema import (
     FROM_SAMPLES,
+    ILLUMINATION_MODES,
     AGE_FocusSweep,
     AGE_ParticleTracking,
     AGE_ParticleTransportVideo,
@@ -51,6 +52,15 @@ RECORDING_ID_ATTR = 'recording_id'
 # ids or a list of ids.
 PARTICLES_ATTR = 'particles'
 OBJECTIVE_ATTR = 'objective'
+# Optional attributes that the age-uploader writes into videos and focus sweeps:
+# the lab id of the chip (AGE_Sample; a coated chip id means its chip), the
+# illumination mode (darkfield or brightfield) and, in videos only, the file
+# names of their focus sweeps in the same folder (comma-separated).
+CHIP_ATTR = 'chip'
+ILLUMINATION_ATTR = 'illumination'
+FOCUS_SWEEPS_ATTR = 'focus_sweeps'
+# A coated chip <chip>_<layer>, e.g. 2023_0418_1_PMMA5 or 2023_0418_PMMA2.
+COATED_CHIP_ID_RE = re.compile(r'(\d{4}_\d{4}(?:_\d)?)_[A-Za-z][A-Za-z0-9]*')
 PYTABLES_ATTRS = {'CLASS', 'PYTABLES_FORMAT_VERSION', 'TITLE', 'VERSION'}
 REQUIRED_TRACK_COLUMNS = ('x', 'y', 'frame', 'particle')
 MAX_PLOT_TRACKS = 100
@@ -459,7 +469,6 @@ def build_video_entry(path: str, rel_path: str) -> AGE_ParticleTransportVideo:
         datetime=parse_timestamp(attrs.get('timestamp')) or time_from_filename(path),
         camera_settings=attrs or None,
     )
-    link_objective_from_attrs(entry, attrs)
     if first_frame is not None:
         entry.illumination = guess_illumination(first_frame)
         figure = plot_frame(first_frame, f'First frame of {name}')
@@ -526,6 +535,88 @@ def link_particles_from_attrs(entry, attrs: dict, archive: EntryArchive, logger)
     found = unique(references)
     if found:
         entry.particle_batches = found
+
+
+def chip_id_from_attrs(attrs: dict, logger) -> Optional[str]:
+    """Lab id of the chip that the chip attribute names; a coated chip id such as
+    2023_0418_1_PMMA5 means its chip. None without the attribute, or with a
+    warning if it names several."""
+    lab_ids = lab_ids_from_attr(attrs.get(CHIP_ATTR))
+    if len(lab_ids) > 1:
+        logger.warning(
+            f'Chip attribute names {len(lab_ids)} chips ({", ".join(lab_ids)}); '
+            'ignored, the chip is taken from the file name'
+        )
+    if len(lab_ids) != 1:
+        return None
+    coated = COATED_CHIP_ID_RE.fullmatch(lab_ids[0])
+    return normalize_sample_id(coated[1] if coated else lab_ids[0])
+
+
+def link_chip_from_attrs(entry, attrs: dict, mainfile: str, archive, logger):
+    """Link the chip of the chip attribute as chip and sample; without it, the
+    chips in the file name as samples (the normalizer makes the chip of them).
+
+    A chip that is not found is only reported: it stays a sample by lab id,
+    which NOMAD links once the chip exists, and the file name is not used, so
+    that the attribute fills the chip on reprocessing."""
+    lab_id = chip_id_from_attrs(attrs, logger)
+    if lab_id is None:
+        link_AGE_samples(entry, chip_ids_from_filename(mainfile), archive, logger)
+        return
+    link_AGE_samples(entry, [lab_id], archive, logger)
+    reference = entry.samples[0].reference
+    if reference is not None:
+        entry.chip = reference_value(reference)
+
+
+def illumination_from_attrs(entry, attrs: dict, logger) -> None:
+    """Set the illumination that the illumination attribute names, in place of
+    the one guessed from the image brightness; other values are reported."""
+    value = attrs.get(ILLUMINATION_ATTR)
+    if value is None or not str(value).strip():
+        return
+    mode = str(value).strip().lower()
+    if mode in ILLUMINATION_MODES:
+        entry.illumination = mode
+    else:
+        logger.warning(
+            f'Illumination attribute {value!r} is none of '
+            f'{", ".join(ILLUMINATION_MODES)}; illumination guessed from the image '
+            f'brightness: {entry.illumination}'
+        )
+
+
+def link_lab_attrs(entry, attrs: dict, mainfile: str, archive, logger) -> None:
+    """Chip, particle batches, objective and illumination of a video or focus
+    sweep from the attributes of its file; stored values that users picked win
+    on reprocessing, see store_entry."""
+    link_chip_from_attrs(entry, attrs, mainfile, archive, logger)
+    link_particles_from_attrs(entry, attrs, archive, logger)
+    link_objective_from_attrs(entry, attrs)
+    illumination_from_attrs(entry, attrs, logger)
+
+
+def link_focus_sweeps_from_attrs(entry, attrs: dict, archive, logger) -> None:
+    """Link the focus sweeps that the focus_sweeps attribute of a video names:
+    files in the folder of the video. The reference is the entry file that the
+    sweep parser writes next to the sweep, computed from its path, so that it
+    does not matter which file is processed first. Files that the upload does
+    not have are only reported."""
+    rel_directory = os.path.dirname(entry.video_file or '')
+    upload_id = archive.metadata.upload_id
+    references = []
+    for name in lab_ids_from_attr(attrs.get(FOCUS_SWEEPS_ATTR)):
+        rel_sweep = os.path.normpath(os.path.join(rel_directory, name))
+        if not archive.m_context.raw_path_exists(rel_sweep):
+            logger.warning(
+                f'Focus sweep {name} of the focus_sweeps attribute is not in the '
+                f'folder of the video ({rel_directory or "upload root"}); not linked'
+            )
+            continue
+        references.append(get_hash_ref(upload_id, f'{rel_sweep}.archive.yaml'))
+    if references:
+        entry.focus_sweeps = unique(references)
 
 
 def video_samples_and_instruments(archive: EntryArchive, rel_video: str, logger):
@@ -773,7 +864,7 @@ class FocusSweepParser(MatchingParser):
         logger.info(f'FocusSweepParser called on {mainfile}')
         rel_mainfile = archive.metadata.mainfile or os.path.basename(mainfile)
         entry = build_focus_sweep_entry(mainfile, rel_mainfile)
-        link_AGE_samples(entry, chip_ids_from_filename(mainfile), archive, logger)
+        link_lab_attrs(entry, read_h5_attrs(mainfile), mainfile, archive, logger)
         store_entry(entry, archive, mainfile, 'focus sweep', logger)
 
 
@@ -784,6 +875,7 @@ class ParticleTransportVideoParser(MatchingParser):
         logger.info(f'ParticleTransportVideoParser called on {mainfile}')
         rel_mainfile = archive.metadata.mainfile or os.path.basename(mainfile)
         entry = build_video_entry(mainfile, rel_mainfile)
-        link_AGE_samples(entry, chip_ids_from_filename(mainfile), archive, logger)
-        link_particles_from_attrs(entry, entry.camera_settings or {}, archive, logger)
+        attrs = entry.camera_settings or {}
+        link_lab_attrs(entry, attrs, mainfile, archive, logger)
+        link_focus_sweeps_from_attrs(entry, attrs, archive, logger)
         store_entry(entry, archive, mainfile, 'particle transport video', logger)
